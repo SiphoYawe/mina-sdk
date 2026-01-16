@@ -56,3 +56,17 @@ export {
   type QuoteResponse,
   type QuotesResponse,
 } from './quote';
+
+// Deposit services - USDC arrival detection and Hyperliquid deposit
+export {
+  detectUsdcArrival,
+  detectUsdcArrivalFromSnapshot,
+  snapshotUsdcBalance,
+  checkUsdcBalance,
+  UsdcArrivalTimeoutError,
+  isUsdcArrivalTimeoutError,
+  ARRIVAL_DETECTION_TIMEOUT_MS,
+  ARRIVAL_POLL_INTERVAL_MS,
+  type UsdcArrivalResult,
+  type DetectionOptions,
+} from './deposit';

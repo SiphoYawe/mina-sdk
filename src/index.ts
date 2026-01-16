@@ -180,3 +180,18 @@ export {
 
 // Execute types
 export type { ExecuteConfig, ExecutionStatus } from './services/execute';
+
+// USDC Arrival Detection - for detecting bridged funds on HyperEVM
+export {
+  detectUsdcArrival,
+  detectUsdcArrivalFromSnapshot,
+  snapshotUsdcBalance,
+  checkUsdcBalance,
+  UsdcArrivalTimeoutError,
+  isUsdcArrivalTimeoutError,
+  ARRIVAL_DETECTION_TIMEOUT_MS,
+  ARRIVAL_POLL_INTERVAL_MS,
+} from './services/deposit';
+
+// USDC Arrival types
+export type { UsdcArrivalResult, DetectionOptions } from './services/deposit';

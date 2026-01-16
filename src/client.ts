@@ -58,6 +58,14 @@ import {
   execute as executeTransaction,
   validateQuote,
 } from './services/execute';
+import {
+  detectUsdcArrival as detectArrival,
+  detectUsdcArrivalFromSnapshot as detectArrivalFromSnapshot,
+  snapshotUsdcBalance as snapshotBalance,
+  checkUsdcBalance as checkUsdcBalanceOnHyperEVM,
+  type UsdcArrivalResult,
+  type DetectionOptions,
+} from './services/deposit';
 
 /**
  * Main client for the Mina Bridge SDK
@@ -780,5 +788,116 @@ export class Mina {
    */
   setAutoDeposit(enabled: boolean): void {
     this.config.autoDeposit = enabled;
+  }
+
+  /**
+   * Detect USDC arrival on HyperEVM after a bridge transaction
+   *
+   * Polls the USDC balance on HyperEVM and detects when it increases,
+   * indicating the bridged funds have arrived.
+   *
+   * @param walletAddress - The wallet address to monitor
+   * @param options - Detection options (timeout, pollInterval, callbacks)
+   * @returns UsdcArrivalResult with detected amount and details
+   * @throws UsdcArrivalTimeoutError if detection times out
+   *
+   * @example
+   * ```typescript
+   * // After bridge execution completes
+   * const arrival = await mina.detectUsdcArrival('0x...', {
+   *   timeout: 300000, // 5 minutes
+   *   onPoll: (attempt, balance) => console.log(`Poll ${attempt}: ${balance}`),
+   * });
+   *
+   * if (arrival.detected) {
+   *   console.log(`USDC arrived: ${arrival.amountFormatted} USDC`);
+   *   if (mina.isAutoDepositEnabled()) {
+   *     // Proceed with deposit to Hyperliquid L1
+   *   }
+   * }
+   * ```
+   */
+  async detectUsdcArrival(
+    walletAddress: string,
+    options?: DetectionOptions
+  ): Promise<UsdcArrivalResult> {
+    return detectArrival(walletAddress, options);
+  }
+
+  /**
+   * Detect USDC arrival starting from a known balance snapshot
+   *
+   * Use this when you've already captured the pre-bridge balance via
+   * snapshotUsdcBalance(). More efficient than detectUsdcArrival() as
+   * it doesn't need to fetch the initial balance.
+   *
+   * @param walletAddress - The wallet address to monitor
+   * @param previousBalance - The pre-bridge balance snapshot
+   * @param options - Detection options
+   * @returns UsdcArrivalResult with detected amount
+   * @throws UsdcArrivalTimeoutError if detection times out
+   *
+   * @example
+   * ```typescript
+   * // Before bridge
+   * const preBalance = await mina.snapshotUsdcBalance('0x...');
+   *
+   * // Execute bridge...
+   * await mina.execute({ quote, signer });
+   *
+   * // Detect arrival from snapshot
+   * const arrival = await mina.detectUsdcArrivalFromSnapshot(
+   *   '0x...',
+   *   preBalance,
+   *   { expectedAmount: quote.toAmount }
+   * );
+   * ```
+   */
+  async detectUsdcArrivalFromSnapshot(
+    walletAddress: string,
+    previousBalance: string,
+    options?: DetectionOptions
+  ): Promise<UsdcArrivalResult> {
+    return detectArrivalFromSnapshot(walletAddress, previousBalance, options);
+  }
+
+  /**
+   * Take a snapshot of USDC balance on HyperEVM
+   *
+   * Call this before initiating a bridge to capture the starting balance.
+   * Use with detectUsdcArrivalFromSnapshot() for efficient arrival detection.
+   *
+   * @param walletAddress - The wallet address to snapshot
+   * @returns The current USDC balance on HyperEVM
+   *
+   * @example
+   * ```typescript
+   * const preBalance = await mina.snapshotUsdcBalance('0x...');
+   * // Store preBalance for later comparison
+   * ```
+   */
+  async snapshotUsdcBalance(walletAddress: string): Promise<string> {
+    return snapshotBalance(walletAddress);
+  }
+
+  /**
+   * Check current USDC balance on HyperEVM (one-time check)
+   *
+   * @param walletAddress - The wallet address to check
+   * @returns Current USDC balance details
+   *
+   * @example
+   * ```typescript
+   * const { balance, balanceFormatted } = await mina.checkUsdcBalance('0x...');
+   * console.log(`HyperEVM USDC: ${balanceFormatted}`);
+   * ```
+   */
+  async checkUsdcBalance(walletAddress: string): Promise<{
+    balance: string;
+    balanceFormatted: string;
+    chainId: number;
+    tokenAddress: string;
+  }> {
+    return checkUsdcBalanceOnHyperEVM(walletAddress);
   }
 }
