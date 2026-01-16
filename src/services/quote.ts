@@ -821,6 +821,7 @@ function mapLifiQuoteToQuote(
     fromToken: mapLifiToken(lifiResponse.action.fromToken),
     toToken: mapLifiToken(lifiResponse.action.toToken),
     includesAutoDeposit: autoDeposit && params.toChainId === HYPEREVM_CHAIN_ID,
+    manualDepositRequired: !autoDeposit && params.toChainId === HYPEREVM_CHAIN_ID,
   };
 }
 
@@ -862,6 +863,7 @@ function mapLifiRouteToQuote(
     fromToken: mapLifiToken(lifiRoute.fromToken),
     toToken: mapLifiToken(lifiRoute.toToken),
     includesAutoDeposit: autoDeposit && params.toChainId === HYPEREVM_CHAIN_ID,
+    manualDepositRequired: !autoDeposit && params.toChainId === HYPEREVM_CHAIN_ID,
   };
 }
 

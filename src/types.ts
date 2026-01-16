@@ -202,6 +202,8 @@ export interface Quote {
   toToken: Token;
   /** Whether auto-deposit to Hyperliquid L1 is included */
   includesAutoDeposit: boolean;
+  /** Whether manual deposit is required (when autoDeposit is disabled for HyperEVM destination) */
+  manualDepositRequired: boolean;
 }
 
 /**
