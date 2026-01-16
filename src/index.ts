@@ -93,6 +93,8 @@ export {
   NetworkError,
   DepositFailedError,
   ChainFetchError,
+  MaxRetriesExceededError,
+  QuoteExpiredError as QuoteExpiredErrorFromErrors,
   // Type guards
   isMinaError,
   isInsufficientBalanceError,
@@ -102,7 +104,19 @@ export {
   isUserRejectedError,
   isNetworkError,
   isDepositFailedError,
+  isMaxRetriesExceededError,
+  isQuoteExpiredError as isQuoteExpiredErrorFromErrors,
+  isRecoverableError,
+  // Error normalization
+  normalizeError,
+  // Recovery actions
+  RECOVERY_ACTIONS,
+  // Constants
+  MAX_RETRIES,
 } from './errors';
+
+// Recovery action type
+export type { RecoveryAction } from './errors';
 
 // Token fetch error from token service
 export { TokenFetchError } from './services/token';
@@ -242,10 +256,12 @@ export {
   MinimumDepositError,
   InsufficientGasError,
   DepositTransactionError,
+  InvalidDepositAddressError,
   // Type guards
   isMinimumDepositError,
   isInsufficientGasError,
   isDepositTransactionError,
+  isInvalidDepositAddressError,
 } from './services/deposit';
 
 // Deposit execution types

@@ -143,10 +143,14 @@ interface LifiRoutesResponse {
  */
 export class QuoteFetchError extends MinaError {
   readonly code = 'QUOTE_FETCH_FAILED' as const;
-  readonly recoveryAction = 'retry' as const;
+  readonly recoverable = true as const;
 
   constructor(message: string, details?: Record<string, unknown>) {
-    super(message, details);
+    super(message, {
+      userMessage: 'Failed to fetch quote. Please try again.',
+      recoveryAction: 'retry',
+      details,
+    });
     this.name = 'QuoteFetchError';
   }
 }
@@ -156,11 +160,16 @@ export class QuoteFetchError extends MinaError {
  */
 export class InvalidQuoteParamsError extends MinaError {
   readonly code = 'INVALID_QUOTE_PARAMS' as const;
+  readonly recoverable = false as const;
   readonly param: string;
   readonly reason: string;
 
   constructor(param: string, reason: string) {
-    super(`Invalid quote parameter '${param}': ${reason}`, { param, reason });
+    super(`Invalid quote parameter '${param}': ${reason}`, {
+      userMessage: `Invalid ${param}: ${reason}`,
+      recoveryAction: 'try_different_amount',
+      details: { param, reason },
+    });
     this.name = 'InvalidQuoteParamsError';
     this.param = param;
     this.reason = reason;
@@ -931,7 +940,6 @@ async function fetchQuoteFromApi(
       {
         endpoint: url,
         statusCode: response.status,
-        retryable: response.status >= 500,
       }
     );
   }
@@ -998,7 +1006,6 @@ async function fetchRoutesFromApi(
       {
         endpoint: url,
         statusCode: response.status,
-        retryable: response.status >= 500,
       }
     );
   }

@@ -161,7 +161,7 @@ interface LifiStatusResponse {
  */
 export class QuoteExpiredError extends MinaError {
   readonly code = 'QUOTE_EXPIRED' as const;
-  readonly recoveryAction = 'fetch_new_quote' as const;
+  readonly recoverable = true as const;
   readonly quoteId: string;
   readonly expiredAt: number;
 
@@ -172,7 +172,11 @@ export class QuoteExpiredError extends MinaError {
       expiredAt: number;
     }
   ) {
-    super(message, details);
+    super(message, {
+      userMessage: 'Your quote has expired. Please get a new quote to continue.',
+      recoveryAction: 'fetch_new_quote',
+      details,
+    });
     this.quoteId = details.quoteId;
     this.expiredAt = details.expiredAt;
   }
@@ -183,11 +187,15 @@ export class QuoteExpiredError extends MinaError {
  */
 export class InvalidQuoteError extends MinaError {
   readonly code = 'INVALID_QUOTE' as const;
-  readonly recoveryAction = 'fetch_new_quote' as const;
+  readonly recoverable = false as const;
   readonly reason: string;
 
   constructor(message: string, details: { reason: string }) {
-    super(message, details);
+    super(message, {
+      userMessage: 'The quote is invalid or malformed. Please get a new quote.',
+      recoveryAction: 'fetch_new_quote',
+      details,
+    });
     this.reason = details.reason;
   }
 }
@@ -297,7 +305,6 @@ async function getStepTransaction(
     throw new NetworkError(`Failed to get step transaction: ${errorText}`, {
       endpoint: url,
       statusCode: response.status,
-      retryable: response.status >= 500,
     });
   }
 
@@ -809,7 +816,7 @@ export async function execute(config: ExecuteConfig): Promise<ExecutionResult> {
         if (isUserRejection(error)) {
           updateStep(step.id, { status: 'failed', error: 'User rejected' });
           throw new UserRejectedError('User rejected transaction', {
-            step: step.id,
+            step: stepType,
           });
         }
 

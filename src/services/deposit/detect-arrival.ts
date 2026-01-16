@@ -60,6 +60,7 @@ export interface DetectionOptions {
  */
 export class UsdcArrivalTimeoutError extends MinaError {
   readonly code = 'USDC_ARRIVAL_TIMEOUT' as const;
+  readonly recoverable = true as const;
   readonly walletAddress: string;
   readonly timeout: number;
   readonly lastBalance: string;
@@ -72,7 +73,12 @@ export class UsdcArrivalTimeoutError extends MinaError {
       lastBalance: string;
     }
   ) {
-    super(message, details);
+    super(message, {
+      step: 'bridge',
+      userMessage: 'USDC arrival detection timed out. Your funds may still be in transit.',
+      recoveryAction: 'retry',
+      details,
+    });
     this.walletAddress = details.walletAddress;
     this.timeout = details.timeout;
     this.lastBalance = details.lastBalance;
@@ -135,7 +141,6 @@ async function getUsdcBalance(walletAddress: string): Promise<string> {
         throw new NetworkError('Failed to fetch USDC balance', {
           endpoint: url,
           statusCode: response.status,
-          retryable: true,
         });
       }
     }
@@ -198,7 +203,6 @@ async function getUsdcBalanceDirect(walletAddress: string): Promise<string> {
       throw new NetworkError('Failed to fetch USDC balance via RPC', {
         endpoint: rpcUrl,
         statusCode: response.status,
-        retryable: true,
       });
     }
 
@@ -207,7 +211,6 @@ async function getUsdcBalanceDirect(walletAddress: string): Promise<string> {
     if (result.error) {
       throw new NetworkError(`RPC error: ${result.error.message}`, {
         endpoint: rpcUrl,
-        retryable: true,
       });
     }
 
@@ -224,7 +227,6 @@ async function getUsdcBalanceDirect(walletAddress: string): Promise<string> {
     }
     throw new NetworkError('Failed to fetch USDC balance', {
       endpoint: rpcUrl,
-      retryable: true,
     });
   }
 }

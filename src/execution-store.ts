@@ -43,6 +43,12 @@ export interface ExecutionState {
   substatus: string;
   /** Error (if failed) */
   error: Error | null;
+  /** Number of retry attempts */
+  retryCount: number;
+  /** Previous errors from retry attempts */
+  previousErrors: Error[];
+  /** Step that failed (for retry) */
+  failedStepIndex: number | null;
   /** Created timestamp */
   createdAt: number;
   /** Updated timestamp */
@@ -147,6 +153,9 @@ class ExecutionStore {
       estimatedTime: params.estimatedTime,
       substatus: 'Initializing...',
       error: null,
+      retryCount: 0,
+      previousErrors: [],
+      failedStepIndex: null,
       createdAt: now,
       updatedAt: now,
     };
