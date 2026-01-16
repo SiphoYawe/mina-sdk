@@ -122,6 +122,8 @@ export {
   getBalanceWithMetadata,
   getBalances,
   getChainBalances,
+  validateBalance,
+  checkBalance,
   invalidateBalanceCache,
   createBalanceCache,
   resetDefaultBalanceCache,
@@ -137,6 +139,10 @@ export type {
   BalanceWithMetadata,
   BalancesResponse,
   SingleBalanceResponse,
+  BalanceValidation,
+  BalanceWarning,
+  BalanceWarningType,
+  BalanceCheckResult,
 } from './services/balance';
 
 // Standalone quote functions (for use without Mina client)

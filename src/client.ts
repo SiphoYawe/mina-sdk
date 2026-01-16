@@ -34,11 +34,15 @@ import {
   getBalances as fetchBalances,
   getChainBalances as fetchChainBalances,
   getBalanceWithMetadata as fetchBalanceWithMetadata,
+  validateBalance as doValidateBalance,
+  checkBalance as doCheckBalance,
   createBalanceCache,
   BalanceCache,
   type BalanceWithMetadata,
   type BalancesResponse,
   type SingleBalanceResponse,
+  type BalanceValidation,
+  type BalanceCheckResult,
 } from './services/balance';
 import {
   getQuote as fetchQuote,
@@ -465,6 +469,69 @@ export class Mina {
     } else {
       this.balanceCache.invalidate();
     }
+  }
+
+  /**
+   * Validate user balance against a quote
+   * Checks both token balance and native gas token balance
+   *
+   * @param quote - Quote to validate against
+   * @param walletAddress - User's wallet address
+   * @returns Balance validation result with warnings
+   *
+   * @example
+   * ```typescript
+   * const quote = await mina.getQuote({...});
+   * const validation = await mina.validateBalance(quote, '0x...');
+   *
+   * if (!validation.valid) {
+   *   for (const warning of validation.warnings) {
+   *     if (warning.type === 'INSUFFICIENT_BALANCE') {
+   *       console.error(`Need ${warning.shortfall} more ${warning.token.symbol}`);
+   *     } else if (warning.type === 'INSUFFICIENT_GAS') {
+   *       console.error(`Need more gas: ${warning.message}`);
+   *     }
+   *   }
+   * }
+   * ```
+   */
+  async validateBalance(quote: Quote, walletAddress: string): Promise<BalanceValidation> {
+    return doValidateBalance(quote, walletAddress, this.balanceCache);
+  }
+
+  /**
+   * Lightweight balance check without requiring a full quote
+   * Checks if a user has sufficient balance for a given amount
+   * Uses cached balances (10s TTL) to reduce RPC calls
+   *
+   * @param chainId - Chain ID
+   * @param tokenAddress - Token address
+   * @param walletAddress - User's wallet address
+   * @param amount - Required amount in smallest unit (wei)
+   * @returns Balance check result
+   *
+   * @example
+   * ```typescript
+   * // Check if user has 1000 USDC before showing quote
+   * const check = await mina.checkBalance(
+   *   1,                                          // Ethereum
+   *   '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+   *   '0x...',                                     // Wallet
+   *   '1000000000'                                 // 1000 USDC (6 decimals)
+   * );
+   *
+   * if (!check.sufficient) {
+   *   console.log(`Balance: ${check.formatted}, need ${check.shortfall} more`);
+   * }
+   * ```
+   */
+  async checkBalance(
+    chainId: number,
+    tokenAddress: string,
+    walletAddress: string,
+    amount: string
+  ): Promise<BalanceCheckResult> {
+    return doCheckBalance(chainId, tokenAddress, walletAddress, amount, this.balanceCache);
   }
 
   /**
