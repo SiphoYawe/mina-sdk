@@ -1,16 +1,16 @@
 {
-  "name": "@mina-bridge/sdk",
+  "name": "@siphoyawe/mina-sdk",
   "version": "0.0.1",
   "description": "Cross-chain bridge SDK for Hyperliquid - Bridge assets from 40+ chains with auto-deposit to your trading account",
   "author": "Mina Bridge Contributors",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/mina-bridge/sdk"
+    "url": "https://github.com/siphoyawe/mina-sdk"
   },
-  "homepage": "https://github.com/mina-bridge/sdk#readme",
+  "homepage": "https://github.com/siphoyawe/mina-sdk#readme",
   "bugs": {
-    "url": "https://github.com/mina-bridge/sdk/issues"
+    "url": "https://github.com/siphoyawe/mina-sdk/issues"
   },
   "keywords": [
     "hyperliquid",

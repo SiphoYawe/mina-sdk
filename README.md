@@ -1,17 +1,17 @@
-# @mina-bridge/sdk
+# @siphoyawe/mina-sdk
 
 Cross-chain bridge SDK for Hyperliquid. Bridge assets from any EVM chain to HyperEVM with optional auto-deposit to Hyperliquid L1.
 
 ## Installation
 
 ```bash
-npm install @mina-bridge/sdk
+npm install @siphoyawe/mina-sdk
 ```
 
 ## Quick Start
 
 ```typescript
-import { Mina } from '@mina-bridge/sdk';
+import { Mina } from '@siphoyawe/mina-sdk';
 
 // Initialize the client
 const mina = new Mina({
@@ -66,7 +66,7 @@ import type {
   ExecutionResult,
   TransactionStatus,
   Balance,
-} from '@mina-bridge/sdk';
+} from '@siphoyawe/mina-sdk';
 ```
 
 ### Constants
@@ -79,7 +79,7 @@ import {
   DEFAULT_SLIPPAGE,
   LIFI_API_URL,
   HYPEREVM_USDC_ADDRESS,
-} from '@mina-bridge/sdk';
+} from '@siphoyawe/mina-sdk';
 ```
 
 ## API Reference
