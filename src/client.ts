@@ -10,8 +10,20 @@ import type {
   TransactionStatus,
   Balance,
   ExecutionStatusType,
+  StepStatusPayload,
+  TransactionStatusPayload,
 } from './types';
 import { DEFAULT_SLIPPAGE, HYPEREVM_CHAIN_ID } from './constants';
+import {
+  SDKEventEmitter,
+  SDK_EVENTS,
+  type SDKEventName,
+  type SDKEventPayloads,
+} from './events';
+import {
+  executionStore,
+  type ExecutionStatusResult,
+} from './execution-store';
 import {
   getChains as fetchChains,
   getDestinationChains as fetchDestinationChains,
@@ -94,6 +106,7 @@ export class Mina {
   private tokenCache: TokenCache;
   private balanceCache: BalanceCache;
   private quoteCache: QuoteCache;
+  private emitter: SDKEventEmitter;
 
   /**
    * Create a new Mina client instance
@@ -110,6 +123,108 @@ export class Mina {
     this.tokenCache = createTokenCache();
     this.balanceCache = createBalanceCache();
     this.quoteCache = createQuoteCache();
+    this.emitter = new SDKEventEmitter();
+  }
+
+  // ==================== Event System ====================
+
+  /**
+   * Subscribe to an SDK event
+   * @param event - Event name from SDK_EVENTS
+   * @param callback - Callback function
+   *
+   * @example
+   * ```typescript
+   * mina.on('stepChanged', (step) => {
+   *   console.log(`Step ${step.stepId}: ${step.status}`);
+   * });
+   *
+   * mina.on('executionCompleted', (result) => {
+   *   console.log('Bridge complete!', result.txHash);
+   * });
+   * ```
+   */
+  on<K extends SDKEventName>(
+    event: K,
+    callback: (data: SDKEventPayloads[K]) => void
+  ): void {
+    this.emitter.on(event, callback);
+  }
+
+  /**
+   * Unsubscribe from an SDK event
+   * @param event - Event name
+   * @param callback - Callback function to remove
+   *
+   * @example
+   * ```typescript
+   * const handler = (step) => console.log(step);
+   * mina.on('stepChanged', handler);
+   * // Later...
+   * mina.off('stepChanged', handler);
+   * ```
+   */
+  off<K extends SDKEventName>(
+    event: K,
+    callback: (data: SDKEventPayloads[K]) => void
+  ): void {
+    this.emitter.off(event, callback);
+  }
+
+  /**
+   * Subscribe to an SDK event once (auto-unsubscribes after first call)
+   * @param event - Event name
+   * @param callback - Callback function
+   *
+   * @example
+   * ```typescript
+   * mina.once('executionCompleted', (result) => {
+   *   console.log('First execution completed!', result.txHash);
+   * });
+   * ```
+   */
+  once<K extends SDKEventName>(
+    event: K,
+    callback: (data: SDKEventPayloads[K]) => void
+  ): void {
+    this.emitter.once(event, callback);
+  }
+
+  /**
+   * Get the internal event emitter (for advanced use)
+   * @internal
+   */
+  getEmitter(): SDKEventEmitter {
+    return this.emitter;
+  }
+
+  // ==================== Execution Status ====================
+
+  /**
+   * Get the status of an execution by ID
+   * Allows polling for execution progress without callbacks
+   *
+   * @param executionId - The execution ID returned from execute()
+   * @returns ExecutionStatusResult with current status, progress, and error details
+   *
+   * @example
+   * ```typescript
+   * const result = await mina.execute({ quote, signer });
+   * const executionId = result.executionId;
+   *
+   * // Poll for status
+   * const status = mina.getExecutionStatus(executionId);
+   * console.log(`Progress: ${status.progress}%`);
+   * console.log(`Current step: ${status.currentStep?.type}`);
+   *
+   * if (status.error) {
+   *   console.error(`Failed: ${status.error.message}`);
+   *   console.log(`Recoverable: ${status.error.recoverable}`);
+   * }
+   * ```
+   */
+  getExecutionStatus(executionId: string): ExecutionStatusResult {
+    return executionStore.getStatus(executionId);
   }
 
   /**
@@ -738,6 +853,7 @@ export class Mina {
       onApprovalRequest: options.onApprovalRequest,
       onTransactionRequest: options.onTransactionRequest,
       infiniteApproval: options.infiniteApproval,
+      emitter: this.emitter,
     });
   }
 
@@ -766,13 +882,62 @@ export class Mina {
   }
 
   /**
-   * Get the status of a bridge transaction
+   * Get the status of a bridge transaction by transaction hash
+   * Searches all stored executions for the given transaction hash
+   *
    * @param txHash - Transaction hash to check
-   * @returns Current transaction status
+   * @returns Current transaction status or null if not found
+   *
+   * @example
+   * ```typescript
+   * const status = await mina.getStatus('0x123...');
+   * if (status) {
+   *   console.log(`Status: ${status.status}`);
+   *   console.log(`Steps: ${status.steps.length}`);
+   * }
+   * ```
    */
-  async getStatus(txHash: string): Promise<TransactionStatus> {
-    // TODO: Implement status tracking
-    throw new Error('Not implemented');
+  async getStatus(txHash: string): Promise<TransactionStatus | null> {
+    // Search all executions for the given txHash
+    const allExecutions = executionStore.getAll();
+    const execution = allExecutions.find((e) => e.txHash === txHash);
+
+    if (!execution) {
+      return null;
+    }
+
+    // Map ExecutionState status to TransactionStatus status
+    const mapStatus = (status: string): TransactionStatus['status'] => {
+      switch (status) {
+        case 'in_progress':
+          return 'bridging';
+        case 'completed':
+          return 'completed';
+        case 'failed':
+          return 'failed';
+        default:
+          return 'pending';
+      }
+    };
+
+    return {
+      id: execution.executionId,
+      status: mapStatus(execution.status),
+      steps: execution.steps.map((s) => ({
+        stepId: s.stepId,
+        stepType: s.step,
+        status: s.status === 'active' ? 'executing' : s.status as 'pending' | 'executing' | 'completed' | 'failed',
+        txHash: s.txHash ?? undefined,
+        error: s.error?.message,
+        updatedAt: s.timestamp,
+      })),
+      fromChainId: execution.fromChainId,
+      toChainId: execution.toChainId,
+      bridgeTxHash: execution.txHash ?? undefined,
+      depositTxHash: undefined, // Set by deposit service
+      createdAt: execution.createdAt,
+      updatedAt: execution.updatedAt,
+    };
   }
 
   /**

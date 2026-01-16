@@ -3,7 +3,17 @@
  * Handles bridge transaction execution with step tracking and callbacks
  */
 
-import type { Quote, Step, StepStatus, ExecutionResult } from '../types';
+import type {
+  Quote,
+  Step,
+  StepStatus,
+  ExecutionResult,
+  StepType,
+  StepStatusPayload,
+  TransactionStatusPayload,
+  OnStepChange,
+  OnStatusChange,
+} from '../types';
 import { LIFI_API_URL } from '../constants';
 import {
   MinaError,
@@ -11,6 +21,16 @@ import {
   UserRejectedError,
   NetworkError,
 } from '../errors';
+import {
+  SDKEventEmitter,
+  SDK_EVENTS,
+  calculateProgress,
+  mapSubstatusToMessage,
+} from '../events';
+import {
+  executionStore,
+  generateExecutionId,
+} from '../execution-store';
 
 /**
  * Maximum quote age in milliseconds (5 minutes)
@@ -65,16 +85,18 @@ export interface ExecuteConfig {
   quote: Quote;
   /** Signer for transaction signing */
   signer: TransactionSigner;
-  /** Callback for step status updates */
-  onStepChange?: (step: StepStatus) => void;
-  /** Callback for overall status updates */
-  onStatusChange?: (status: ExecutionStatus) => void;
+  /** Callback for step status updates (typed as OnStepChange) */
+  onStepChange?: OnStepChange;
+  /** Callback for overall status updates (typed as OnStatusChange) */
+  onStatusChange?: OnStatusChange;
   /** Callback before approval transaction */
   onApprovalRequest?: () => void;
   /** Callback before main transaction */
   onTransactionRequest?: () => void;
   /** Allow infinite token approval */
   infiniteApproval?: boolean;
+  /** Event emitter for SDK events (optional, passed from Mina client) */
+  emitter?: SDKEventEmitter;
 }
 
 /**
@@ -448,11 +470,30 @@ async function waitForCompletion(
 }
 
 /**
+ * Map Step type to StepType
+ */
+function mapStepType(stepType: Step['type']): StepType {
+  switch (stepType) {
+    case 'approve':
+      return 'approval';
+    case 'swap':
+      return 'swap';
+    case 'bridge':
+      return 'bridge';
+    case 'deposit':
+      return 'deposit';
+    default:
+      return 'bridge';
+  }
+}
+
+/**
  * Create initial step statuses from quote steps
  */
 function createInitialStepStatuses(steps: Step[]): StepStatus[] {
   return steps.map((step) => ({
     stepId: step.id,
+    stepType: mapStepType(step.type),
     status: 'pending' as const,
     updatedAt: Date.now(),
   }));
@@ -508,35 +549,119 @@ export async function execute(config: ExecuteConfig): Promise<ExecutionResult> {
     onApprovalRequest,
     onTransactionRequest,
     infiniteApproval = false,
+    emitter,
   } = config;
 
   // Validate quote first
   validateQuote(quote);
 
+  // Generate execution ID and create execution state
+  const executionId = generateExecutionId();
+  const totalSteps = quote.steps.length;
+
+  // Create execution in store
+  executionStore.create({
+    executionId,
+    quoteId: quote.id,
+    steps: quote.steps.map((s) => ({ id: s.id, type: mapStepType(s.type) })),
+    fromAmount: quote.fromAmount,
+    toAmount: quote.toAmount,
+    fromChainId: quote.steps[0]?.fromChainId ?? 0,
+    toChainId: quote.steps[quote.steps.length - 1]?.toChainId ?? 0,
+    estimatedTime: quote.estimatedTime,
+  });
+
+  // Emit execution started event
+  emitter?.emit(SDK_EVENTS.EXECUTION_STARTED, {
+    executionId,
+    quoteId: quote.id,
+    timestamp: Date.now(),
+  });
+
   // Initialize result
   let stepStatuses = createInitialStepStatuses(quote.steps);
   let currentStatus: ExecutionStatus = 'idle';
+  let currentStepIndex = 0;
   let finalTxHash: string | undefined;
   let receivedAmount: string | undefined;
+  let receivingTxHash: string | null = null;
 
-  const updateStatus = (status: ExecutionStatus) => {
+  const updateStatus = (status: ExecutionStatus, substatus: string = '') => {
     currentStatus = status;
-    onStatusChange?.(status);
+
+    // Map ExecutionStatus to TransactionStatusPayload status
+    const mappedStatus = status === 'completed' ? 'completed' as const
+      : status === 'failed' ? 'failed' as const
+      : status === 'idle' ? 'pending' as const
+      : 'in_progress' as const;
+
+    // Update execution store
+    executionStore.update(executionId, {
+      status: mappedStatus,
+      substatus: substatus || mapSubstatusToMessage(status.toUpperCase()),
+      progress: calculateProgress(currentStepIndex, totalSteps, status === 'completed' ? 1 : 0.5),
+    });
+
+    // Create transaction status payload
+    const txStatusPayload: TransactionStatusPayload = {
+      status: mappedStatus,
+      substatus: substatus || mapSubstatusToMessage(status.toUpperCase()),
+      currentStep: currentStepIndex + 1,
+      totalSteps,
+      fromAmount: quote.fromAmount,
+      toAmount: quote.toAmount,
+      txHash: finalTxHash ?? '',
+      receivingTxHash,
+      progress: calculateProgress(currentStepIndex, totalSteps, status === 'completed' ? 1 : 0.5),
+      estimatedTime: quote.estimatedTime,
+    };
+
+    // Emit status changed event
+    emitter?.emit(SDK_EVENTS.STATUS_CHANGED, txStatusPayload);
+
+    // Call callback with TransactionStatusPayload
+    onStatusChange?.(txStatusPayload);
   };
 
   const updateStep = (stepId: string, update: Partial<StepStatus>) => {
     stepStatuses = updateStepStatus(stepStatuses, stepId, update);
     const stepStatus = stepStatuses.find((s) => s.stepId === stepId);
-    if (stepStatus && onStepChange) {
-      onStepChange(stepStatus);
-    }
+    if (!stepStatus) return;
+
+    // Update execution store
+    const stepType = stepStatus.stepType || 'bridge';
+    executionStore.updateStep(executionId, stepId, {
+      step: stepType,
+      status: update.status === 'executing' ? 'active' : (update.status ?? stepStatus.status) as 'pending' | 'active' | 'completed' | 'failed',
+      txHash: update.txHash ?? stepStatus.txHash ?? null,
+      error: update.error ? new Error(update.error) : null,
+    });
+
+    // Create step status payload
+    const stepPayload: StepStatusPayload = {
+      stepId,
+      step: stepType,
+      status: update.status === 'executing' ? 'active' : (update.status ?? stepStatus.status) as 'pending' | 'active' | 'completed' | 'failed',
+      txHash: update.txHash ?? stepStatus.txHash ?? null,
+      error: update.error ? new Error(update.error) : null,
+      timestamp: Date.now(),
+    };
+
+    // Emit step changed event
+    emitter?.emit(SDK_EVENTS.STEP_CHANGED, stepPayload);
+
+    // Call callback with StepStatusPayload
+    onStepChange?.(stepPayload);
   };
 
   try {
     const fromAddress = await signer.getAddress();
 
     // Process each step
-    for (const step of quote.steps) {
+    for (let i = 0; i < quote.steps.length; i++) {
+      const step = quote.steps[i]!;
+      currentStepIndex = i;
+
       // Skip deposit steps (handled separately in Story 5.1/5.2)
       if (step.type === 'deposit') {
         updateStep(step.id, { status: 'pending' });
@@ -560,8 +685,15 @@ export async function execute(config: ExecuteConfig): Promise<ExecutionResult> {
         );
 
         if (needsApproval) {
-          updateStatus('approving');
+          updateStatus('approving', 'Waiting for token approval...');
           onApprovalRequest?.();
+
+          // Emit approval required event
+          emitter?.emit(SDK_EVENTS.APPROVAL_REQUIRED, {
+            tokenAddress: step.fromToken.address,
+            amount: step.fromAmount,
+            spender: stepTx.estimate.approvalAddress,
+          });
 
           try {
             const approvalTx = await getApprovalTransaction(
@@ -574,10 +706,24 @@ export async function execute(config: ExecuteConfig): Promise<ExecutionResult> {
 
             const approvalTxHash = await signer.sendTransaction(approvalTx);
 
+            // Emit transaction sent event
+            emitter?.emit(SDK_EVENTS.TRANSACTION_SENT, {
+              txHash: approvalTxHash,
+              chainId: step.fromChainId,
+              stepType: 'approval',
+            });
+
             // Wait for approval to be mined (simplified - in production would poll)
             await new Promise((resolve) => setTimeout(resolve, APPROVAL_CONFIRMATION_WAIT_MS));
 
-            updateStatus('approved');
+            updateStatus('approved', 'Token approval confirmed');
+
+            // Emit transaction confirmed event
+            emitter?.emit(SDK_EVENTS.TRANSACTION_CONFIRMED, {
+              txHash: approvalTxHash,
+              chainId: step.fromChainId,
+              stepType: 'approval',
+            });
 
             // Store approval hash for tracking
             updateStep(step.id, { txHash: approvalTxHash });
@@ -593,7 +739,8 @@ export async function execute(config: ExecuteConfig): Promise<ExecutionResult> {
       }
 
       // Execute the main transaction
-      updateStatus('executing');
+      const stepType = mapStepType(step.type);
+      updateStatus('executing', `Executing ${stepType}...`);
       onTransactionRequest?.();
 
       try {
@@ -609,8 +756,19 @@ export async function execute(config: ExecuteConfig): Promise<ExecutionResult> {
         const txHash = await signer.sendTransaction(txRequest);
         finalTxHash = txHash;
 
+        // Emit transaction sent event
+        emitter?.emit(SDK_EVENTS.TRANSACTION_SENT, {
+          txHash,
+          chainId: step.fromChainId,
+          stepType,
+        });
+
         updateStep(step.id, { status: 'executing', txHash });
-        updateStatus('bridging');
+
+        // Update execution store with txHash
+        executionStore.update(executionId, { txHash });
+
+        updateStatus('bridging', 'Waiting for bridge confirmation...');
 
         // Wait for transaction completion
         const finalStatus = await waitForCompletion(
@@ -621,15 +779,31 @@ export async function execute(config: ExecuteConfig): Promise<ExecutionResult> {
             // Update based on LI.FI status
             if (status.status === 'PENDING') {
               updateStep(step.id, { status: 'executing', txHash });
+              updateStatus('bridging', mapSubstatusToMessage(status.substatus || 'PENDING'));
+            }
+            if (status.receiving?.txHash) {
+              receivingTxHash = status.receiving.txHash;
+              executionStore.update(executionId, { receivingTxHash });
             }
           }
         );
+
+        // Emit transaction confirmed event
+        emitter?.emit(SDK_EVENTS.TRANSACTION_CONFIRMED, {
+          txHash,
+          chainId: step.toChainId,
+          stepType,
+        });
 
         // Update with completion
         updateStep(step.id, { status: 'completed', txHash });
 
         if (finalStatus.receiving?.amount) {
           receivedAmount = finalStatus.receiving.amount;
+          executionStore.update(executionId, { receivedAmount });
+        }
+        if (finalStatus.receiving?.txHash) {
+          receivingTxHash = finalStatus.receiving.txHash;
         }
       } catch (error: unknown) {
         if (isUserRejection(error)) {
@@ -648,9 +822,24 @@ export async function execute(config: ExecuteConfig): Promise<ExecutionResult> {
     }
 
     // All steps completed
-    updateStatus('completed');
+    updateStatus('completed', 'Bridge completed successfully');
+
+    // Update execution store
+    executionStore.update(executionId, {
+      status: 'completed',
+      progress: 100,
+      substatus: 'Bridge completed successfully',
+    });
+
+    // Emit execution completed event
+    emitter?.emit(SDK_EVENTS.EXECUTION_COMPLETED, {
+      executionId,
+      txHash: finalTxHash ?? '',
+      receivedAmount: receivedAmount ?? null,
+    });
 
     return {
+      executionId,
       status: 'completed',
       steps: stepStatuses,
       txHash: finalTxHash,
@@ -660,7 +849,7 @@ export async function execute(config: ExecuteConfig): Promise<ExecutionResult> {
       depositTxHash: null, // Set by Story 5.2 when auto-deposit is executed
     };
   } catch (error) {
-    updateStatus('failed');
+    updateStatus('failed', error instanceof Error ? error.message : 'Unknown error');
 
     // Mark any pending steps as failed
     stepStatuses = stepStatuses.map((status) =>
@@ -669,14 +858,31 @@ export async function execute(config: ExecuteConfig): Promise<ExecutionResult> {
         : status
     );
 
+    const errorObj = error instanceof Error ? error : new Error(String(error));
+
+    // Update execution store
+    executionStore.update(executionId, {
+      status: 'failed',
+      error: errorObj,
+      substatus: errorObj.message,
+    });
+
+    // Emit execution failed event
+    emitter?.emit(SDK_EVENTS.EXECUTION_FAILED, {
+      executionId,
+      error: errorObj,
+      step: stepStatuses.find((s) => s.status === 'failed')?.stepId ?? null,
+    });
+
     return {
+      executionId,
       status: 'failed',
       steps: stepStatuses,
       txHash: finalTxHash,
       fromAmount: quote.fromAmount,
       toAmount: quote.toAmount,
       depositTxHash: null,
-      error: error instanceof Error ? error : new Error(String(error)),
+      error: errorObj,
     };
   }
 }

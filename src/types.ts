@@ -232,6 +232,65 @@ export interface TransactionRequestData {
 }
 
 /**
+ * Step type for bridge execution
+ */
+export type StepType = 'approval' | 'swap' | 'bridge' | 'deposit';
+
+/**
+ * Enhanced step status payload for callbacks
+ */
+export interface StepStatusPayload {
+  /** Step identifier */
+  stepId: string;
+  /** Type of step */
+  step: StepType;
+  /** Current status */
+  status: 'pending' | 'active' | 'completed' | 'failed';
+  /** Transaction hash (if submitted) */
+  txHash: string | null;
+  /** Error (if failed) */
+  error: Error | null;
+  /** Timestamp of last update */
+  timestamp: number;
+}
+
+/**
+ * Transaction status payload with progress tracking
+ */
+export interface TransactionStatusPayload {
+  /** Overall status */
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  /** Substatus for detailed state */
+  substatus: string;
+  /** Current step index (1-based for UI display) */
+  currentStep: number;
+  /** Total number of steps */
+  totalSteps: number;
+  /** Input amount */
+  fromAmount: string;
+  /** Output amount (or expected) */
+  toAmount: string | null;
+  /** Bridge transaction hash */
+  txHash: string;
+  /** Receiving transaction hash on destination chain */
+  receivingTxHash: string | null;
+  /** Progress percentage (0-100) */
+  progress: number;
+  /** Estimated time remaining in seconds */
+  estimatedTime: number;
+}
+
+/**
+ * Callback type for step changes
+ */
+export type OnStepChange = (stepStatus: StepStatusPayload) => void;
+
+/**
+ * Callback type for overall status changes
+ */
+export type OnStatusChange = (status: TransactionStatusPayload) => void;
+
+/**
  * Options for executing a quote
  */
 export interface ExecuteOptions {
@@ -239,10 +298,10 @@ export interface ExecuteOptions {
   quote: Quote;
   /** Signer for transaction signing */
   signer: TransactionSigner;
-  /** Callback for step status updates */
-  onStepChange?: (step: StepStatus) => void;
-  /** Callback for overall status updates */
-  onStatusChange?: (status: ExecutionStatusType) => void;
+  /** Callback for step status updates (typed as OnStepChange) */
+  onStepChange?: OnStepChange;
+  /** Callback for overall status updates (typed as OnStatusChange) */
+  onStatusChange?: OnStatusChange;
   /** Callback before approval transaction */
   onApprovalRequest?: () => void;
   /** Callback before main transaction */
@@ -264,11 +323,13 @@ export type ExecutionStatusType =
   | 'failed';
 
 /**
- * Status of a step during execution
+ * Status of a step during execution (legacy interface for internal use)
  */
 export interface StepStatus {
   /** Step ID */
   stepId: string;
+  /** Step type */
+  stepType?: StepType;
   /** Current status */
   status: 'pending' | 'executing' | 'completed' | 'failed';
   /** Transaction hash (if submitted) */
@@ -283,6 +344,8 @@ export interface StepStatus {
  * Result of executing a bridge transaction
  */
 export interface ExecutionResult {
+  /** Unique execution ID for status tracking */
+  executionId: string;
   /** Overall status ('completed' maps to 'success' in story spec) */
   status: 'pending' | 'executing' | 'completed' | 'failed';
   /** All step statuses */

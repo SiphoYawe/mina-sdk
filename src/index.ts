@@ -17,6 +17,8 @@ export type {
   QuoteParams,
   Step,
   StepStatus,
+  StepStatusPayload,
+  TransactionStatusPayload,
   Fees,
   FeeItem,
   GasEstimate,
@@ -28,7 +30,34 @@ export type {
   TransactionSigner,
   TransactionRequestData,
   ExecutionStatusType,
+  StepType,
+  OnStepChange,
+  OnStatusChange,
 } from './types';
+
+// Event system
+export {
+  SDKEventEmitter,
+  SDK_EVENTS,
+  calculateProgress,
+  mapSubstatusToMessage,
+} from './events';
+
+export type {
+  SDKEventName,
+  SDKEventPayloads,
+} from './events';
+
+// Execution store for status tracking
+export {
+  executionStore,
+  generateExecutionId,
+} from './execution-store';
+
+export type {
+  ExecutionState,
+  ExecutionStatusResult,
+} from './execution-store';
 
 // Chain response type with metadata
 export type { ChainsResponse } from './services/chain';
@@ -195,3 +224,36 @@ export {
 
 // USDC Arrival types
 export type { UsdcArrivalResult, DetectionOptions } from './services/deposit';
+
+// Deposit Execution - for depositing USDC from HyperEVM to Hyperliquid L1 (HyperCore)
+export {
+  executeDeposit,
+  executeDepositFor,
+  validateDepositRequirements,
+  approveUsdcForDeposit,
+  checkDepositAllowance,
+  // Constants
+  CORE_DEPOSIT_WALLET_ADDRESS,
+  MINIMUM_DEPOSIT_AMOUNT,
+  DestinationDex,
+  CORE_DEPOSIT_WALLET_ABI,
+  ERC20_ABI,
+  // Error classes
+  MinimumDepositError,
+  InsufficientGasError,
+  DepositTransactionError,
+  // Type guards
+  isMinimumDepositError,
+  isInsufficientGasError,
+  isDepositTransactionError,
+} from './services/deposit';
+
+// Deposit execution types
+export type {
+  DepositOptions,
+  DepositResult,
+  DepositStatus,
+  DepositValidation,
+  DepositSigner,
+  DestinationDexType,
+} from './services/deposit';
