@@ -10,6 +10,42 @@ import type {
   Balance,
 } from './types';
 import { DEFAULT_SLIPPAGE, HYPEREVM_CHAIN_ID } from './constants';
+import {
+  getChains as fetchChains,
+  getDestinationChains as fetchDestinationChains,
+  getChainsByRoutes as fetchChainsByRoutes,
+  getChainById as fetchChainById,
+  createChainCache,
+  ChainCache,
+  type ChainsResponse,
+} from './services/chain';
+import {
+  getTokens as fetchTokens,
+  getBridgeableTokens as fetchBridgeableTokens,
+  getDestinationTokens as fetchDestinationTokens,
+  getTokenByAddress as fetchTokenByAddress,
+  createTokenCache,
+  TokenCache,
+  type TokensResponse,
+} from './services/token';
+import {
+  getBalance as fetchBalance,
+  getBalances as fetchBalances,
+  getChainBalances as fetchChainBalances,
+  getBalanceWithMetadata as fetchBalanceWithMetadata,
+  createBalanceCache,
+  BalanceCache,
+  type BalanceWithMetadata,
+  type BalancesResponse,
+  type SingleBalanceResponse,
+} from './services/balance';
+import {
+  getQuote as fetchQuote,
+  getQuotes as fetchQuotes,
+  createQuoteCache,
+  QuoteCache,
+  type QuotesResponse,
+} from './services/quote';
 
 /**
  * Main client for the Mina Bridge SDK
@@ -34,6 +70,10 @@ import { DEFAULT_SLIPPAGE, HYPEREVM_CHAIN_ID } from './constants';
  */
 export class Mina {
   private config: MinaConfig;
+  private chainCache: ChainCache;
+  private tokenCache: TokenCache;
+  private balanceCache: BalanceCache;
+  private quoteCache: QuoteCache;
 
   /**
    * Create a new Mina client instance
@@ -45,6 +85,11 @@ export class Mina {
       defaultSlippage: DEFAULT_SLIPPAGE,
       ...config,
     };
+    // Each Mina client instance gets its own cache to avoid shared state issues
+    this.chainCache = createChainCache();
+    this.tokenCache = createTokenCache();
+    this.balanceCache = createBalanceCache();
+    this.quoteCache = createQuoteCache();
   }
 
   /**
@@ -56,53 +101,463 @@ export class Mina {
 
   /**
    * Get supported source chains for bridging
-   * @returns Array of supported chains
+   * Fetches from LI.FI API with caching (30 min TTL)
+   *
+   * @returns Array of 40+ supported origin chains with metadata
+   * @throws ChainFetchError if API fails and no cache available
+   *
+   * @example
+   * ```typescript
+   * const chains = await mina.getChains();
+   * console.log(`${chains.length} chains supported`);
+   * // Displays: "50 chains supported"
+   * ```
    */
   async getChains(): Promise<Chain[]> {
-    // TODO: Implement via LiFi API
-    throw new Error('Not implemented');
+    const response = await fetchChains(this.chainCache);
+    return response.chains;
   }
 
   /**
-   * Get available tokens for a specific chain
+   * Get supported source chains with metadata about cache staleness
+   * Fetches from LI.FI API with caching (30 min TTL)
+   *
+   * @returns Response object with chains array and metadata (isStale, cachedAt)
+   * @throws ChainFetchError if API fails and no cache available
+   *
+   * @example
+   * ```typescript
+   * const { chains, isStale, cachedAt } = await mina.getChainsWithMetadata();
+   * if (isStale) {
+   *   console.warn('Using cached data from', new Date(cachedAt));
+   * }
+   * ```
+   */
+  async getChainsWithMetadata(): Promise<ChainsResponse> {
+    return fetchChains(this.chainCache);
+  }
+
+  /**
+   * Get destination chains (HyperEVM)
+   * Returns the supported destination chain(s) for bridging
+   *
+   * @returns Array containing HyperEVM chain
+   *
+   * @example
+   * ```typescript
+   * const destinations = mina.getDestinationChains();
+   * console.log(destinations[0].name); // "HyperEVM"
+   * ```
+   */
+  getDestinationChains(): Chain[] {
+    return fetchDestinationChains();
+  }
+
+  /**
+   * Get chains with valid bridge routes to a specific destination
+   * Useful for filtering to only chains that can bridge to HyperEVM
+   *
+   * @param toChainId - Destination chain ID (defaults to HyperEVM 999)
+   * @returns Array of chains with valid routes
+   * @throws ChainFetchError if API fails and no cache available
+   *
+   * @example
+   * ```typescript
+   * // Get only chains that can bridge to HyperEVM
+   * const bridgeableChains = await mina.getChainsByRoutes();
+   * ```
+   */
+  async getChainsByRoutes(toChainId: number = HYPEREVM_CHAIN_ID): Promise<Chain[]> {
+    return fetchChainsByRoutes(toChainId, this.chainCache);
+  }
+
+  /**
+   * Get a specific chain by its ID
+   *
+   * @param chainId - The chain ID to look up
+   * @returns Chain if found, undefined otherwise
+   *
+   * @example
+   * ```typescript
+   * const ethereum = await mina.getChainById(1);
+   * console.log(ethereum?.name); // "Ethereum"
+   * ```
+   */
+  async getChainById(chainId: number): Promise<Chain | undefined> {
+    return fetchChainById(chainId, this.chainCache);
+  }
+
+  /**
+   * Invalidate the chain cache
+   * Forces a fresh fetch on next getChains() call
+   *
+   * @example
+   * ```typescript
+   * mina.invalidateChainCache();
+   * const freshChains = await mina.getChains();
+   * ```
+   */
+  invalidateChainCache(): void {
+    this.chainCache.invalidate();
+  }
+
+  /**
+   * Get all available tokens for a specific chain
+   * Fetches from LI.FI API with caching (15 min TTL)
+   *
    * @param chainId - Chain ID to get tokens for
-   * @returns Array of available tokens
+   * @returns Array of available tokens with metadata
+   * @throws TokenFetchError if API fails and no cache available
+   *
+   * @example
+   * ```typescript
+   * const tokens = await mina.getTokens(1); // Ethereum tokens
+   * console.log(`Found ${tokens.length} tokens`);
+   * ```
    */
   async getTokens(chainId: number): Promise<Token[]> {
-    // TODO: Implement via LiFi API
-    throw new Error('Not implemented');
+    const response = await fetchTokens(chainId, this.tokenCache);
+    return response.tokens;
   }
 
   /**
-   * Get token balance for an address
+   * Get tokens with metadata about cache staleness
+   * Fetches from LI.FI API with caching (15 min TTL)
+   *
+   * @param chainId - Chain ID to get tokens for
+   * @returns Response object with tokens array and metadata (isStale, cachedAt)
+   * @throws TokenFetchError if API fails and no cache available
+   *
+   * @example
+   * ```typescript
+   * const { tokens, isStale, cachedAt } = await mina.getTokensWithMetadata(1);
+   * if (isStale) {
+   *   console.warn('Using cached data from', new Date(cachedAt));
+   * }
+   * ```
+   */
+  async getTokensWithMetadata(chainId: number): Promise<TokensResponse> {
+    return fetchTokens(chainId, this.tokenCache);
+  }
+
+  /**
+   * Get tokens that can be bridged from a specific chain to HyperEVM
+   * Only returns tokens with valid bridge routes
+   *
+   * @param chainId - Source chain ID
+   * @returns Array of bridgeable tokens
+   * @throws TokenFetchError if API fails and no cache available
+   *
+   * @example
+   * ```typescript
+   * // Get only tokens that can bridge from Ethereum to HyperEVM
+   * const bridgeableTokens = await mina.getBridgeableTokens(1);
+   * ```
+   */
+  async getBridgeableTokens(chainId: number): Promise<Token[]> {
+    const response = await fetchBridgeableTokens(chainId, this.tokenCache);
+    return response.tokens;
+  }
+
+  /**
+   * Get bridgeable tokens with metadata about cache staleness
+   *
+   * @param chainId - Source chain ID
+   * @returns Response object with tokens and metadata
+   * @throws TokenFetchError if API fails and no cache available
+   */
+  async getBridgeableTokensWithMetadata(chainId: number): Promise<TokensResponse> {
+    return fetchBridgeableTokens(chainId, this.tokenCache);
+  }
+
+  /**
+   * Get destination tokens available on HyperEVM
+   * Returns verified token addresses for receiving on the destination chain
+   *
+   * @returns Array of tokens receivable on HyperEVM (USDC, HYPE)
+   *
+   * @example
+   * ```typescript
+   * const destTokens = mina.getDestinationTokens();
+   * console.log(destTokens.map(t => t.symbol)); // ['USDC', 'HYPE']
+   * ```
+   */
+  getDestinationTokens(): Token[] {
+    return fetchDestinationTokens();
+  }
+
+  /**
+   * Get a specific token by its address on a chain
+   *
    * @param chainId - Chain ID
    * @param tokenAddress - Token contract address
+   * @returns Token if found, undefined otherwise
+   *
+   * @example
+   * ```typescript
+   * const usdc = await mina.getTokenByAddress(1, '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
+   * console.log(usdc?.symbol); // 'USDC'
+   * ```
+   */
+  async getTokenByAddress(chainId: number, tokenAddress: string): Promise<Token | undefined> {
+    return fetchTokenByAddress(chainId, tokenAddress, this.tokenCache);
+  }
+
+  /**
+   * Invalidate the token cache
+   * Forces a fresh fetch on next getTokens() call
+   *
+   * @param chainId - Optional chain ID to invalidate (invalidates all if not provided)
+   *
+   * @example
+   * ```typescript
+   * mina.invalidateTokenCache(1); // Invalidate Ethereum tokens
+   * mina.invalidateTokenCache();   // Invalidate all tokens
+   * ```
+   */
+  invalidateTokenCache(chainId?: number): void {
+    if (chainId !== undefined) {
+      this.tokenCache.invalidateChain(chainId);
+    } else {
+      this.tokenCache.invalidate();
+    }
+  }
+
+  /**
+   * Get token balance for a wallet address
+   * Fetches from LI.FI API with caching (10s TTL) and request deduplication
+   *
+   * @param chainId - Chain ID
+   * @param tokenAddress - Token contract address (or NATIVE_TOKEN_ADDRESS for native token)
    * @param walletAddress - Wallet address to check balance for
-   * @returns Balance information
+   * @returns Balance information with token metadata
+   * @throws BalanceFetchError if API fails and no cache available
+   *
+   * @example
+   * ```typescript
+   * // Get USDC balance on Ethereum
+   * const balance = await mina.getBalance(1, '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', '0x...');
+   * console.log(`Balance: ${balance.formatted} ${balance.token.symbol}`);
+   * console.log(`USD Value: $${balance.balanceUsd?.toFixed(2) ?? 'N/A'}`);
+   *
+   * // Get native ETH balance
+   * const ethBalance = await mina.getBalance(1, NATIVE_TOKEN_ADDRESS, '0x...');
+   * ```
    */
   async getBalance(
     chainId: number,
     tokenAddress: string,
     walletAddress: string
-  ): Promise<Balance> {
-    // TODO: Implement via RPC/LiFi API
-    throw new Error('Not implemented');
+  ): Promise<BalanceWithMetadata> {
+    return fetchBalance(
+      { address: walletAddress, chainId, tokenAddress },
+      this.balanceCache
+    );
+  }
+
+  /**
+   * Get token balance with metadata about cache staleness (Issue 5)
+   * Fetches from LI.FI API with caching (10s TTL) and request deduplication
+   *
+   * @param chainId - Chain ID
+   * @param tokenAddress - Token contract address (or NATIVE_TOKEN_ADDRESS for native token)
+   * @param walletAddress - Wallet address to check balance for
+   * @returns Response object with balance and metadata (isStale, cachedAt)
+   * @throws BalanceFetchError if API fails and no cache available
+   *
+   * @example
+   * ```typescript
+   * const { balance, isStale, cachedAt } = await mina.getBalanceWithMetadata(
+   *   1, '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', '0x...'
+   * );
+   * if (isStale) {
+   *   console.warn('Using cached data from', new Date(cachedAt));
+   * }
+   * ```
+   */
+  async getBalanceWithMetadata(
+    chainId: number,
+    tokenAddress: string,
+    walletAddress: string
+  ): Promise<SingleBalanceResponse> {
+    return fetchBalanceWithMetadata(
+      { address: walletAddress, chainId, tokenAddress },
+      this.balanceCache
+    );
+  }
+
+  /**
+   * Get token balances across multiple chains in parallel
+   * Includes both native tokens and ERC-20 tokens
+   *
+   * @param walletAddress - Wallet address to check balances for
+   * @param chainIds - Array of chain IDs to fetch balances from
+   * @param tokenAddresses - Optional map of chain ID to token addresses
+   * @returns Balances response with all chain balances and total USD value
+   * @throws BalanceFetchError if all API requests fail and no cache available
+   *
+   * @example
+   * ```typescript
+   * // Get native token balances on Ethereum and Arbitrum
+   * const response = await mina.getBalances('0x...', [1, 42161]);
+   * console.log(`Total USD: $${response.totalUsd.toFixed(2)}`);
+   *
+   * // Get specific token balances
+   * const response = await mina.getBalances('0x...', [1], {
+   *   1: ['0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'] // USDC on Ethereum
+   * });
+   * ```
+   */
+  async getBalances(
+    walletAddress: string,
+    chainIds: number[],
+    tokenAddresses?: Record<number, string[]>
+  ): Promise<BalancesResponse> {
+    return fetchBalances(
+      { address: walletAddress, chainIds, tokenAddresses },
+      this.balanceCache
+    );
+  }
+
+  /**
+   * Get all supported token balances for a specific chain
+   * Returns balances sorted by value (non-zero first, then by USD value)
+   *
+   * @param walletAddress - Wallet address
+   * @param chainId - Chain ID to fetch balances from
+   * @returns Array of balances sorted by value
+   *
+   * @example
+   * ```typescript
+   * const balances = await mina.getChainBalances('0x...', 1);
+   * for (const balance of balances) {
+   *   if (balance.hasBalance) {
+   *     console.log(`${balance.token.symbol}: ${balance.formatted}`);
+   *   }
+   * }
+   * ```
+   */
+  async getChainBalances(
+    walletAddress: string,
+    chainId: number
+  ): Promise<BalanceWithMetadata[]> {
+    return fetchChainBalances(walletAddress, chainId, this.balanceCache);
+  }
+
+  /**
+   * Invalidate the balance cache
+   * Forces a fresh fetch on next getBalance() call
+   *
+   * @param walletAddress - Optional wallet address to invalidate (invalidates all if not provided)
+   *
+   * @example
+   * ```typescript
+   * mina.invalidateBalanceCache('0x...'); // Invalidate specific wallet
+   * mina.invalidateBalanceCache();         // Invalidate all balances
+   * ```
+   */
+  invalidateBalanceCache(walletAddress?: string): void {
+    if (walletAddress) {
+      this.balanceCache.invalidateAddress(walletAddress);
+    } else {
+      this.balanceCache.invalidate();
+    }
   }
 
   /**
    * Get a bridge quote
+   * Fetches optimal route from LI.FI API with fee breakdown
+   *
    * @param params - Quote parameters
+   * @param timeoutMs - Optional timeout override (default: 30s)
    * @returns Quote with route and fee information
+   * @throws InvalidQuoteParamsError if parameters are invalid
+   * @throws NoRouteFoundError if no route is available
+   * @throws NetworkError if API request fails
+   *
+   * @example
+   * ```typescript
+   * const quote = await mina.getQuote({
+   *   fromChainId: 1,
+   *   toChainId: 999,
+   *   fromToken: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+   *   toToken: '0xb88339cb7199b77e23db6e890353e22632ba630f', // HyperEVM USDC
+   *   fromAmount: '1000000000', // 1000 USDC (6 decimals)
+   *   fromAddress: '0x...',
+   * });
+   * console.log(`Will receive: ${quote.toAmount}`);
+   * console.log(`Estimated time: ${quote.estimatedTime}s`);
+   * console.log(`Total fees: $${quote.fees.totalUsd}`);
+   * ```
    */
-  async getQuote(params: QuoteParams): Promise<Quote> {
+  async getQuote(params: QuoteParams, timeoutMs?: number): Promise<Quote> {
     const quoteParams: QuoteParams = {
       ...params,
       toChainId: params.toChainId ?? HYPEREVM_CHAIN_ID,
       slippage: params.slippage ?? this.config.defaultSlippage,
     };
 
-    // TODO: Implement via LiFi API
-    throw new Error('Not implemented');
+    return fetchQuote(
+      quoteParams,
+      this.config.autoDeposit ?? true,
+      this.quoteCache,
+      timeoutMs
+    );
+  }
+
+  /**
+   * Get multiple bridge quotes for comparison
+   * Fetches all available routes from LI.FI API
+   *
+   * @param params - Quote parameters
+   * @param timeoutMs - Optional timeout override (default: 30s)
+   * @returns Array of quotes sorted by recommendation
+   * @throws InvalidQuoteParamsError if parameters are invalid
+   * @throws NoRouteFoundError if no routes are available
+   * @throws NetworkError if API request fails
+   *
+   * @example
+   * ```typescript
+   * const { quotes, recommendedIndex } = await mina.getQuotes({
+   *   fromChainId: 1,
+   *   toChainId: 999,
+   *   fromToken: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+   *   toToken: '0xb88339cb7199b77e23db6e890353e22632ba630f',
+   *   fromAmount: '1000000000',
+   *   fromAddress: '0x...',
+   * });
+   *
+   * console.log(`Found ${quotes.length} routes`);
+   * console.log(`Recommended: ${quotes[recommendedIndex].steps[0].tool}`);
+   * ```
+   */
+  async getQuotes(params: QuoteParams, timeoutMs?: number): Promise<QuotesResponse> {
+    const quoteParams: QuoteParams = {
+      ...params,
+      toChainId: params.toChainId ?? HYPEREVM_CHAIN_ID,
+      slippage: params.slippage ?? this.config.defaultSlippage,
+    };
+
+    return fetchQuotes(
+      quoteParams,
+      this.config.autoDeposit ?? true,
+      this.quoteCache,
+      timeoutMs
+    );
+  }
+
+  /**
+   * Invalidate the quote cache
+   * Forces fresh quotes on next getQuote() call
+   *
+   * @example
+   * ```typescript
+   * mina.invalidateQuoteCache();
+   * const freshQuote = await mina.getQuote({...});
+   * ```
+   */
+  invalidateQuoteCache(): void {
+    this.quoteCache.invalidate();
   }
 
   /**
