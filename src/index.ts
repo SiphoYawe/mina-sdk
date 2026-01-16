@@ -25,6 +25,9 @@ export type {
   ExecutionResult,
   TransactionStatus,
   Balance,
+  TransactionSigner,
+  TransactionRequestData,
+  ExecutionStatusType,
 } from './types';
 
 // Chain response type with metadata
@@ -164,3 +167,16 @@ export type {
   QuotesResponse,
   PriceImpactEstimate,
 } from './services/quote';
+
+// Execute service - transaction execution
+export {
+  execute,
+  validateQuote,
+  QuoteExpiredError,
+  InvalidQuoteError,
+  isQuoteExpiredError,
+  isInvalidQuoteError,
+} from './services/execute';
+
+// Execute types
+export type { ExecuteConfig, ExecutionStatus } from './services/execute';

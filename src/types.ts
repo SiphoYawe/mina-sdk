@@ -207,18 +207,61 @@ export interface Quote {
 }
 
 /**
+ * Signer interface for transaction signing
+ * Compatible with viem WalletClient and ethers Signer
+ */
+export interface TransactionSigner {
+  /** Sign and send a transaction */
+  sendTransaction: (request: TransactionRequestData) => Promise<string>;
+  /** Get the signer's address */
+  getAddress: () => Promise<string>;
+  /** Get the current chain ID */
+  getChainId: () => Promise<number>;
+}
+
+/**
+ * Transaction request data for signing
+ */
+export interface TransactionRequestData {
+  to: string;
+  data: string;
+  value: string;
+  gasLimit?: string;
+  gasPrice?: string;
+  chainId: number;
+}
+
+/**
  * Options for executing a quote
  */
 export interface ExecuteOptions {
   /** Quote to execute */
   quote: Quote;
-  /** Signer/wallet for signing transactions */
-  signer: unknown; // Will be typed properly when integrating with viem/ethers
-  /** Callback for step updates */
-  onStepUpdate?: (step: Step, status: StepStatus) => void;
-  /** Callback for transaction hash */
-  onTxHash?: (txHash: string, step: Step) => void;
+  /** Signer for transaction signing */
+  signer: TransactionSigner;
+  /** Callback for step status updates */
+  onStepChange?: (step: StepStatus) => void;
+  /** Callback for overall status updates */
+  onStatusChange?: (status: ExecutionStatusType) => void;
+  /** Callback before approval transaction */
+  onApprovalRequest?: () => void;
+  /** Callback before main transaction */
+  onTransactionRequest?: () => void;
+  /** Allow infinite token approval */
+  infiniteApproval?: boolean;
 }
+
+/**
+ * Overall execution status type
+ */
+export type ExecutionStatusType =
+  | 'idle'
+  | 'approving'
+  | 'approved'
+  | 'executing'
+  | 'bridging'
+  | 'completed'
+  | 'failed';
 
 /**
  * Status of a step during execution
@@ -240,16 +283,22 @@ export interface StepStatus {
  * Result of executing a bridge transaction
  */
 export interface ExecutionResult {
-  /** Overall status */
+  /** Overall status ('completed' maps to 'success' in story spec) */
   status: 'pending' | 'executing' | 'completed' | 'failed';
   /** All step statuses */
   steps: StepStatus[];
-  /** Final transaction hash (if completed) */
+  /** Final bridge transaction hash */
   txHash?: string;
+  /** Input amount that was bridged */
+  fromAmount?: string;
+  /** Output amount received (or expected) */
+  toAmount?: string;
+  /** Received amount after bridge completion */
+  receivedAmount?: string;
+  /** Deposit transaction hash (if auto-deposit was enabled) */
+  depositTxHash?: string | null;
   /** Error (if failed) */
   error?: Error;
-  /** Received amount (if completed) */
-  receivedAmount?: string;
 }
 
 /**

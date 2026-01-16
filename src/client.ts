@@ -9,6 +9,7 @@ import type {
   ExecutionResult,
   TransactionStatus,
   Balance,
+  ExecutionStatusType,
 } from './types';
 import { DEFAULT_SLIPPAGE, HYPEREVM_CHAIN_ID } from './constants';
 import {
@@ -53,6 +54,10 @@ import {
   type QuotesResponse,
   type PriceImpactEstimate,
 } from './services/quote';
+import {
+  execute as executeTransaction,
+  validateQuote,
+} from './services/execute';
 
 /**
  * Main client for the Mina Bridge SDK
@@ -690,12 +695,66 @@ export class Mina {
 
   /**
    * Execute a bridge transaction
+   * Initiates the transaction through LI.FI's execution API
+   *
    * @param options - Execution options including quote and signer
    * @returns Execution result with status and transaction hash
+   * @throws QuoteExpiredError if the quote has expired
+   * @throws InvalidQuoteError if the quote is malformed
+   * @throws TransactionFailedError if the transaction fails
+   * @throws UserRejectedError if the user rejects the transaction
+   *
+   * @example
+   * ```typescript
+   * const quote = await mina.getQuote({...});
+   * const result = await mina.execute({
+   *   quote,
+   *   signer: walletClient, // viem WalletClient or compatible signer
+   *   onStepChange: (step) => console.log('Step update:', step),
+   *   onStatusChange: (status) => console.log('Status:', status),
+   *   infiniteApproval: true,
+   * });
+   *
+   * if (result.status === 'completed') {
+   *   console.log('Bridge complete! TxHash:', result.txHash);
+   *   console.log('Received:', result.receivedAmount);
+   * }
+   * ```
    */
   async execute(options: ExecuteOptions): Promise<ExecutionResult> {
-    // TODO: Implement transaction execution
-    throw new Error('Not implemented');
+    return executeTransaction({
+      quote: options.quote,
+      signer: options.signer,
+      onStepChange: options.onStepChange,
+      onStatusChange: options.onStatusChange,
+      onApprovalRequest: options.onApprovalRequest,
+      onTransactionRequest: options.onTransactionRequest,
+      infiniteApproval: options.infiniteApproval,
+    });
+  }
+
+  /**
+   * Validate a quote before execution
+   * Checks if the quote has expired or is malformed
+   *
+   * @param quote - Quote to validate
+   * @throws QuoteExpiredError if the quote has expired
+   * @throws InvalidQuoteError if the quote is malformed
+   *
+   * @example
+   * ```typescript
+   * try {
+   *   mina.validateQuote(quote);
+   *   // Quote is valid, proceed with execution
+   * } catch (error) {
+   *   if (isQuoteExpiredError(error)) {
+   *     // Fetch a new quote
+   *   }
+   * }
+   * ```
+   */
+  validateQuote(quote: Quote): void {
+    validateQuote(quote);
   }
 
   /**
