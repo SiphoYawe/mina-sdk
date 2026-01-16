@@ -3,7 +3,7 @@
  * Cross-chain bridge SDK for Hyperliquid
  */
 
-export const SDK_VERSION = '0.0.1';
+export const SDK_VERSION = '0.0.2';
 
 // Main client
 export { Mina } from './client';

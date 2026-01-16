@@ -1,6 +1,6 @@
 {
   "name": "@siphoyawe/mina-sdk",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Cross-chain bridge SDK for Hyperliquid - Bridge assets from 40+ chains with auto-deposit to your trading account",
   "author": "Mina Bridge Contributors",
   "license": "MIT",
