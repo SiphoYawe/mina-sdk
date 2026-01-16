@@ -41,6 +41,11 @@ export {
   DEFAULT_SLIPPAGE,
   LIFI_API_URL,
   HYPEREVM_USDC_ADDRESS,
+  // Price impact thresholds
+  PRICE_IMPACT_LOW,
+  PRICE_IMPACT_MEDIUM,
+  PRICE_IMPACT_HIGH,
+  PRICE_IMPACT_VERY_HIGH,
 } from './constants';
 
 // Errors - all documented error types
@@ -138,6 +143,7 @@ export type {
 export {
   getQuote,
   getQuotes,
+  estimatePriceImpact,
   invalidateQuoteCache,
   createQuoteCache,
   resetDefaultQuoteCache,
@@ -150,4 +156,5 @@ export { QuoteCache } from './services/quote';
 export type {
   QuoteResponse,
   QuotesResponse,
+  PriceImpactEstimate,
 } from './services/quote';

@@ -190,6 +190,10 @@ export interface Quote {
   toAmount: string;
   /** Price impact percentage (e.g., 0.01 = 1%) */
   priceImpact: number;
+  /** Whether price impact exceeds HIGH threshold (1%) */
+  highImpact: boolean;
+  /** Price impact severity level */
+  impactSeverity: 'low' | 'medium' | 'high' | 'very_high';
   /** Quote expiration timestamp */
   expiresAt: number;
   /** Source token */

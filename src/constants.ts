@@ -48,3 +48,15 @@ export const BALANCE_CACHE_TTL_MS = 10000; // 10 seconds
 export const BALANCE_DEBOUNCE_MS = 300; // 300 milliseconds
 /** Quote cache TTL - short for real-time quotes */
 export const QUOTE_CACHE_TTL_MS = 30000; // 30 seconds
+
+/**
+ * Price impact thresholds (as decimal, 0.01 = 1%)
+ */
+/** Low price impact threshold - negligible impact */
+export const PRICE_IMPACT_LOW = 0.001; // 0.1%
+/** Medium price impact threshold - acceptable impact */
+export const PRICE_IMPACT_MEDIUM = 0.005; // 0.5%
+/** High price impact threshold - warning level */
+export const PRICE_IMPACT_HIGH = 0.01; // 1%
+/** Very high price impact threshold - danger level */
+export const PRICE_IMPACT_VERY_HIGH = 0.03; // 3%

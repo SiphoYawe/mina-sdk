@@ -43,9 +43,11 @@ import {
 import {
   getQuote as fetchQuote,
   getQuotes as fetchQuotes,
+  estimatePriceImpact as computePriceImpact,
   createQuoteCache,
   QuoteCache,
   type QuotesResponse,
+  type PriceImpactEstimate,
 } from './services/quote';
 
 /**
@@ -586,6 +588,37 @@ export class Mina {
    */
   getGasEstimate(quote: Quote): GasEstimate {
     return quote.fees.gasEstimate;
+  }
+
+  /**
+   * Estimate price impact without fetching a full quote
+   * This is a lightweight method for UI preview purposes
+   *
+   * Note: For accurate price impact, use getQuote() which fetches real route data.
+   * This method uses simplified heuristics based on trade size.
+   *
+   * @param fromToken - Source token (must have priceUsd)
+   * @param toToken - Destination token (must have priceUsd)
+   * @param fromAmount - Amount in smallest unit (wei)
+   * @returns Price impact estimate with severity
+   *
+   * @example
+   * ```typescript
+   * const fromToken = await mina.getTokenByAddress(1, '0xA0b86...');
+   * const toToken = await mina.getTokenByAddress(999, '0xb883...');
+   *
+   * if (fromToken && toToken) {
+   *   const estimate = mina.estimatePriceImpact(fromToken, toToken, '1000000000');
+   *   console.log(`Estimated impact: ${estimate.impact * 100}%`);
+   *   console.log(`Severity: ${estimate.severity}`);
+   *   if (estimate.highImpact) {
+   *     console.warn('High price impact detected!');
+   *   }
+   * }
+   * ```
+   */
+  estimatePriceImpact(fromToken: Token, toToken: Token, fromAmount: string): PriceImpactEstimate {
+    return computePriceImpact(fromToken, toToken, fromAmount);
   }
 
   /**

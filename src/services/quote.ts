@@ -10,6 +10,10 @@ import {
   QUOTE_API_TIMEOUT_MS,
   QUOTE_CACHE_TTL_MS,
   DEFAULT_SLIPPAGE,
+  PRICE_IMPACT_LOW,
+  PRICE_IMPACT_MEDIUM,
+  PRICE_IMPACT_HIGH,
+  PRICE_IMPACT_VERY_HIGH,
 } from '../constants';
 import { MinaError, NoRouteFoundError, NetworkError } from '../errors';
 import { getChainById, ChainCache, createChainCache } from './chain';
@@ -758,6 +762,28 @@ function calculatePriceImpact(fromAmountUsd: number, toAmountUsd: number): numbe
 }
 
 /**
+ * Determine price impact severity based on thresholds
+ * @param priceImpact - Price impact as decimal (0.01 = 1%)
+ * @returns Impact severity level
+ */
+function getImpactSeverity(priceImpact: number): 'low' | 'medium' | 'high' | 'very_high' {
+  const absImpact = Math.abs(priceImpact);
+  if (absImpact >= PRICE_IMPACT_VERY_HIGH) return 'very_high';
+  if (absImpact >= PRICE_IMPACT_HIGH) return 'high';
+  if (absImpact >= PRICE_IMPACT_MEDIUM) return 'medium';
+  return 'low';
+}
+
+/**
+ * Check if price impact exceeds the HIGH threshold
+ * @param priceImpact - Price impact as decimal (0.01 = 1%)
+ * @returns true if impact is >= 1%
+ */
+function isHighImpact(priceImpact: number): boolean {
+  return Math.abs(priceImpact) >= PRICE_IMPACT_HIGH;
+}
+
+/**
  * Map LI.FI quote response to our Quote type
  */
 function mapLifiQuoteToQuote(
@@ -789,6 +815,8 @@ function mapLifiQuoteToQuote(
     fromAmount: lifiResponse.estimate.fromAmount,
     toAmount: lifiResponse.estimate.toAmount,
     priceImpact,
+    highImpact: isHighImpact(priceImpact),
+    impactSeverity: getImpactSeverity(priceImpact),
     expiresAt,
     fromToken: mapLifiToken(lifiResponse.action.fromToken),
     toToken: mapLifiToken(lifiResponse.action.toToken),
@@ -828,6 +856,8 @@ function mapLifiRouteToQuote(
     fromAmount: lifiRoute.fromAmount,
     toAmount: lifiRoute.toAmount,
     priceImpact,
+    highImpact: isHighImpact(priceImpact),
+    impactSeverity: getImpactSeverity(priceImpact),
     expiresAt,
     fromToken: mapLifiToken(lifiRoute.fromToken),
     toToken: mapLifiToken(lifiRoute.toToken),
@@ -1148,6 +1178,87 @@ export function isQuoteFetchError(error: unknown): error is QuoteFetchError {
  */
 export function isInvalidQuoteParamsError(error: unknown): error is InvalidQuoteParamsError {
   return error instanceof InvalidQuoteParamsError;
+}
+
+/**
+ * Result of price impact estimation
+ */
+export interface PriceImpactEstimate {
+  /** Estimated price impact as decimal (0.01 = 1%) */
+  impact: number;
+  /** Whether the impact exceeds HIGH threshold (1%) */
+  highImpact: boolean;
+  /** Impact severity level */
+  severity: 'low' | 'medium' | 'high' | 'very_high';
+}
+
+/**
+ * Estimate price impact without fetching a full quote
+ * This is a lightweight estimation method for UI preview purposes
+ *
+ * Note: This uses a simplified calculation based on cached token prices
+ * and may not account for all factors like liquidity depth.
+ * For accurate price impact, use getQuote() which fetches real route data.
+ *
+ * @param fromToken - Source token with price data
+ * @param toToken - Destination token with price data
+ * @param fromAmount - Amount in smallest unit (wei)
+ * @returns Price impact estimate with severity
+ */
+export function estimatePriceImpact(
+  fromToken: Token,
+  toToken: Token,
+  fromAmount: string
+): PriceImpactEstimate {
+  // If prices are not available, assume minimal impact
+  if (!fromToken.priceUsd || !toToken.priceUsd) {
+    return {
+      impact: 0,
+      highImpact: false,
+      severity: 'low',
+    };
+  }
+
+  try {
+    // Calculate input value in USD
+    const fromAmountNum = parseFloat(fromAmount);
+    const fromValueUsd = (fromAmountNum / Math.pow(10, fromToken.decimals)) * fromToken.priceUsd;
+
+    // Calculate expected output value (assuming 1:1 value at market prices, before any impact)
+    // The real output would be lower due to fees and slippage
+    const expectedOutputUsd = fromValueUsd;
+
+    // For lightweight estimation, assume minimal impact for small amounts
+    // and scale up for larger amounts (simplified liquidity model)
+    let estimatedImpact = 0;
+
+    // Simple heuristic: larger trades have more impact
+    // This is a placeholder - real impact depends on liquidity pools
+    if (fromValueUsd > 100000) {
+      estimatedImpact = 0.01; // 1% for very large trades
+    } else if (fromValueUsd > 10000) {
+      estimatedImpact = 0.005; // 0.5% for large trades
+    } else if (fromValueUsd > 1000) {
+      estimatedImpact = 0.001; // 0.1% for medium trades
+    } else {
+      estimatedImpact = 0.0001; // 0.01% for small trades
+    }
+
+    const impact = Math.round(estimatedImpact * 10000) / 10000;
+
+    return {
+      impact,
+      highImpact: isHighImpact(impact),
+      severity: getImpactSeverity(impact),
+    };
+  } catch {
+    // On error, return minimal impact
+    return {
+      impact: 0,
+      highImpact: false,
+      severity: 'low',
+    };
+  }
 }
 
 /**
