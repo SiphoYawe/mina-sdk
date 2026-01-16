@@ -3,7 +3,7 @@
  * Fetches optimal bridge routes from LI.FI API
  */
 
-import type { Token, Quote, QuoteParams, Step, Fees, GasEstimate } from '../types';
+import type { Token, Quote, QuoteParams, Step, Fees, FeeItem, GasEstimate, StepGas } from '../types';
 import {
   LIFI_API_URL,
   HYPEREVM_CHAIN_ID,
@@ -499,101 +499,247 @@ function extractStepsFromRoute(lifiRoute: LifiRoute): Step[] {
 }
 
 /**
- * Calculate fees from LI.FI quote response
+ * Calculate fees from LI.FI quote response with detailed breakdown
  */
 function calculateFeesFromQuote(lifiResponse: LifiQuoteResponse): Fees {
   const estimate = lifiResponse.estimate;
   let totalGasUsd = 0;
   let bridgeFeeUsd = 0;
-  let gasLimit = '0';
+  let protocolFeeUsd = 0;
+  let totalGasLimit = BigInt(0);
   let gasPrice = '0';
-  let gasCost = '0';
+  let totalGasCost = BigInt(0);
+  let nativeToken: Token | undefined;
+  const stepGasBreakdown: StepGas[] = [];
 
-  // Process gas costs
+  // Process gas costs - aggregate across all steps (Fix for Issue 1, 2, 3)
   if (estimate.gasCosts && estimate.gasCosts.length > 0) {
     for (const gasCostItem of estimate.gasCosts) {
-      totalGasUsd += parseFloat(gasCostItem.amountUSD ?? '0');
+      const gasUsd = parseFloat(gasCostItem.amountUSD ?? '0');
+      totalGasUsd += gasUsd;
 
-      // Use the first gas cost for estimate details
-      if (gasLimit === '0' && gasCostItem.limit) {
-        gasLimit = gasCostItem.limit;
+      // Track native token from gas costs
+      if (!nativeToken && gasCostItem.token) {
+        nativeToken = mapLifiToken(gasCostItem.token);
       }
+
+      // Aggregate gas limit and gas cost across all steps
+      if (gasCostItem.limit) {
+        totalGasLimit += BigInt(gasCostItem.limit);
+      }
+      // Use first non-zero gas price (same chain typically has same gas price)
       if (gasPrice === '0' && gasCostItem.price) {
         gasPrice = gasCostItem.price;
       }
-      gasCost = gasCostItem.amount;
+      if (gasCostItem.amount) {
+        totalGasCost += BigInt(gasCostItem.amount);
+      }
+
+      // Add to step gas breakdown
+      stepGasBreakdown.push({
+        stepType: mapGasType(gasCostItem.type),
+        stepId: gasCostItem.type,
+        gasUnits: gasCostItem.estimate ?? gasCostItem.limit ?? '0',
+        gasUsd,
+      });
     }
   }
 
+  // Convert aggregated BigInt values to strings for output
+  const gasLimit = totalGasLimit.toString();
+  const gasCost = totalGasCost.toString();
+
   // Process fee costs (bridge fees, protocol fees)
+  let bridgeFeeToken: Token | undefined;
+  let bridgeFeeAmount = '0';
+  let protocolFeeToken: Token | undefined;
+  let protocolFeeAmount = '0';
+
   if (estimate.feeCosts && estimate.feeCosts.length > 0) {
     for (const feeCostItem of estimate.feeCosts) {
+      const feeUsd = parseFloat(feeCostItem.amountUSD ?? '0');
       if (!feeCostItem.included) {
-        bridgeFeeUsd += parseFloat(feeCostItem.amountUSD ?? '0');
+        // Distinguish between bridge fees and protocol fees
+        const feeNameLower = (feeCostItem.name || '').toLowerCase();
+        if (feeNameLower.includes('protocol') || feeNameLower.includes('lifi')) {
+          protocolFeeUsd += feeUsd;
+          protocolFeeToken = mapLifiToken(feeCostItem.token);
+          protocolFeeAmount = feeCostItem.amount;
+        } else {
+          bridgeFeeUsd += feeUsd;
+          bridgeFeeToken = mapLifiToken(feeCostItem.token);
+          bridgeFeeAmount = feeCostItem.amount;
+        }
       }
     }
   }
+
+  // Build detailed fee items
+  const gasFee: FeeItem | undefined = nativeToken
+    ? { amount: gasCost, amountUsd: totalGasUsd, token: nativeToken }
+    : undefined;
+
+  const bridgeFee: FeeItem | undefined = bridgeFeeToken
+    ? { amount: bridgeFeeAmount, amountUsd: bridgeFeeUsd, token: bridgeFeeToken }
+    : undefined;
+
+  const protocolFee: FeeItem | undefined = protocolFeeToken
+    ? { amount: protocolFeeAmount, amountUsd: protocolFeeUsd, token: protocolFeeToken }
+    : undefined;
 
   const gasEstimate: GasEstimate = {
     gasLimit,
     gasPrice,
     gasCost,
     gasCostUsd: totalGasUsd,
+    nativeToken,
+    steps: stepGasBreakdown.length > 0 ? stepGasBreakdown : undefined,
+    timestamp: Date.now(),
   };
 
   return {
-    totalUsd: totalGasUsd + bridgeFeeUsd,
+    totalUsd: totalGasUsd + bridgeFeeUsd + protocolFeeUsd,
     gasUsd: totalGasUsd,
     bridgeFeeUsd,
+    protocolFeeUsd,
     gasEstimate,
+    gasFee,
+    bridgeFee,
+    protocolFee,
   };
 }
 
 /**
- * Calculate fees from LI.FI route response (Issue 6 fix)
+ * Map gas cost type to step type
+ */
+function mapGasType(type: string): 'approval' | 'swap' | 'bridge' | 'deposit' {
+  const typeLower = type.toLowerCase();
+  if (typeLower.includes('approval') || typeLower.includes('approve')) return 'approval';
+  if (typeLower.includes('swap')) return 'swap';
+  if (typeLower.includes('deposit')) return 'deposit';
+  return 'bridge'; // default to bridge
+}
+
+/**
+ * Calculate fees from LI.FI route response with detailed breakdown
  */
 function calculateFeesFromRoute(lifiRoute: LifiRoute): Fees {
-  let totalGasUsd = parseFloat(lifiRoute.gasCostUSD ?? '0');
+  let totalGasUsd = 0;
   let bridgeFeeUsd = 0;
-  let gasLimit = '0';
+  let protocolFeeUsd = 0;
+  let totalGasLimit = BigInt(0);
   let gasPrice = '0';
-  let gasCost = '0';
+  let totalGasCost = BigInt(0);
+  let nativeToken: Token | undefined;
+  const stepGasBreakdown: StepGas[] = [];
 
-  // Aggregate fees from all steps
+  // Track fee tokens
+  let bridgeFeeToken: Token | undefined;
+  let bridgeFeeAmount = '0';
+  let protocolFeeToken: Token | undefined;
+  let protocolFeeAmount = '0';
+
+  // Aggregate fees from all steps (Fix for Issue 1, 2, 3)
   for (const step of lifiRoute.steps) {
+    const stepType = mapStepType(step.type);
+
     if (step.estimate.gasCosts && step.estimate.gasCosts.length > 0) {
       for (const gasCostItem of step.estimate.gasCosts) {
-        if (gasLimit === '0' && gasCostItem.limit) {
-          gasLimit = gasCostItem.limit;
+        const gasUsd = parseFloat(gasCostItem.amountUSD ?? '0');
+        totalGasUsd += gasUsd;
+
+        // Track native token from gas costs
+        if (!nativeToken && gasCostItem.token) {
+          nativeToken = mapLifiToken(gasCostItem.token);
         }
+
+        // Aggregate gas limit and gas cost across all steps (instead of overwriting)
+        if (gasCostItem.limit) {
+          totalGasLimit += BigInt(gasCostItem.limit);
+        }
+        // Use first non-zero gas price (same chain typically has same gas price)
         if (gasPrice === '0' && gasCostItem.price) {
           gasPrice = gasCostItem.price;
         }
-        gasCost = gasCostItem.amount;
+        if (gasCostItem.amount) {
+          totalGasCost += BigInt(gasCostItem.amount);
+        }
+
+        // Add to step gas breakdown (map 'approve' to 'approval' for StepGas type)
+        stepGasBreakdown.push({
+          stepType: stepType === 'approve' ? 'approval' : stepType,
+          stepId: step.id,
+          gasUnits: gasCostItem.estimate ?? gasCostItem.limit ?? '0',
+          gasUsd,
+        });
       }
     }
 
     if (step.estimate.feeCosts && step.estimate.feeCosts.length > 0) {
       for (const feeCostItem of step.estimate.feeCosts) {
+        const feeUsd = parseFloat(feeCostItem.amountUSD ?? '0');
         if (!feeCostItem.included) {
-          bridgeFeeUsd += parseFloat(feeCostItem.amountUSD ?? '0');
+          // Distinguish between bridge fees and protocol fees
+          const feeNameLower = (feeCostItem.name || '').toLowerCase();
+          if (feeNameLower.includes('protocol') || feeNameLower.includes('lifi')) {
+            protocolFeeUsd += feeUsd;
+            if (!protocolFeeToken) {
+              protocolFeeToken = mapLifiToken(feeCostItem.token);
+              protocolFeeAmount = feeCostItem.amount;
+            }
+          } else {
+            bridgeFeeUsd += feeUsd;
+            if (!bridgeFeeToken) {
+              bridgeFeeToken = mapLifiToken(feeCostItem.token);
+              bridgeFeeAmount = feeCostItem.amount;
+            }
+          }
         }
       }
     }
   }
+
+  // Use route-level gasCostUSD if step-level sum is 0
+  if (totalGasUsd === 0 && lifiRoute.gasCostUSD) {
+    totalGasUsd = parseFloat(lifiRoute.gasCostUSD);
+  }
+
+  // Convert aggregated BigInt values to strings for output
+  const gasLimit = totalGasLimit.toString();
+  const gasCost = totalGasCost.toString();
+
+  // Build detailed fee items
+  const gasFee: FeeItem | undefined = nativeToken
+    ? { amount: gasCost, amountUsd: totalGasUsd, token: nativeToken }
+    : undefined;
+
+  const bridgeFee: FeeItem | undefined = bridgeFeeToken
+    ? { amount: bridgeFeeAmount, amountUsd: bridgeFeeUsd, token: bridgeFeeToken }
+    : undefined;
+
+  const protocolFee: FeeItem | undefined = protocolFeeToken
+    ? { amount: protocolFeeAmount, amountUsd: protocolFeeUsd, token: protocolFeeToken }
+    : undefined;
 
   const gasEstimate: GasEstimate = {
     gasLimit,
     gasPrice,
     gasCost,
     gasCostUsd: totalGasUsd,
+    nativeToken,
+    steps: stepGasBreakdown.length > 0 ? stepGasBreakdown : undefined,
+    timestamp: Date.now(),
   };
 
   return {
-    totalUsd: totalGasUsd + bridgeFeeUsd,
+    totalUsd: totalGasUsd + bridgeFeeUsd + protocolFeeUsd,
     gasUsd: totalGasUsd,
     bridgeFeeUsd,
+    protocolFeeUsd,
     gasEstimate,
+    gasFee,
+    bridgeFee,
+    protocolFee,
   };
 }
 

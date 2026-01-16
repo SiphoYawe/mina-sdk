@@ -105,6 +105,52 @@ export interface Step {
 }
 
 /**
+ * Individual fee item with amount and token info
+ */
+export interface FeeItem {
+  /** Fee amount in token units (smallest unit) */
+  amount: string;
+  /** Fee amount in USD */
+  amountUsd: number;
+  /** Token the fee is paid in */
+  token: Token;
+}
+
+/**
+ * Gas cost for a single step
+ */
+export interface StepGas {
+  /** Type of step */
+  stepType: 'approval' | 'swap' | 'bridge' | 'deposit';
+  /** Step identifier */
+  stepId: string;
+  /** Estimated gas units */
+  gasUnits: string;
+  /** Gas cost in USD */
+  gasUsd: number;
+}
+
+/**
+ * Gas estimation details
+ */
+export interface GasEstimate {
+  /** Estimated gas limit (total) */
+  gasLimit: string;
+  /** Gas price in wei */
+  gasPrice: string;
+  /** Total gas cost in native token */
+  gasCost: string;
+  /** Total gas cost in USD */
+  gasCostUsd: number;
+  /** Native token used for gas */
+  nativeToken?: Token;
+  /** Gas breakdown per step */
+  steps?: StepGas[];
+  /** Timestamp when gas price was fetched */
+  timestamp?: number;
+}
+
+/**
  * Fee breakdown for a quote
  */
 export interface Fees {
@@ -114,22 +160,16 @@ export interface Fees {
   gasUsd: number;
   /** Bridge/protocol fees in USD */
   bridgeFeeUsd: number;
+  /** Protocol fee in USD (e.g., LI.FI fee) */
+  protocolFeeUsd: number;
   /** Gas estimate in native token */
   gasEstimate: GasEstimate;
-}
-
-/**
- * Gas estimation details
- */
-export interface GasEstimate {
-  /** Estimated gas limit */
-  gasLimit: string;
-  /** Gas price in wei */
-  gasPrice: string;
-  /** Total gas cost in native token */
-  gasCost: string;
-  /** Total gas cost in USD */
-  gasCostUsd: number;
+  /** Detailed gas fee breakdown */
+  gasFee?: FeeItem;
+  /** Detailed bridge fee breakdown */
+  bridgeFee?: FeeItem;
+  /** Detailed protocol fee breakdown */
+  protocolFee?: FeeItem;
 }
 
 /**

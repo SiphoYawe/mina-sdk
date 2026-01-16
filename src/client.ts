@@ -4,6 +4,7 @@ import type {
   Token,
   Quote,
   QuoteParams,
+  GasEstimate,
   ExecuteOptions,
   ExecutionResult,
   TransactionStatus,
@@ -558,6 +559,33 @@ export class Mina {
    */
   invalidateQuoteCache(): void {
     this.quoteCache.invalidate();
+  }
+
+  /**
+   * Get gas estimate from a quote
+   * Extracts detailed gas estimation with per-step breakdown
+   *
+   * @param quote - Quote to extract gas estimate from
+   * @returns GasEstimate with detailed breakdown
+   *
+   * @example
+   * ```typescript
+   * const quote = await mina.getQuote({...});
+   * const gasEstimate = mina.getGasEstimate(quote);
+   *
+   * console.log(`Total gas: $${gasEstimate.gasCostUsd}`);
+   * console.log(`Gas price: ${gasEstimate.gasPrice} wei`);
+   *
+   * // Per-step breakdown
+   * if (gasEstimate.steps) {
+   *   for (const step of gasEstimate.steps) {
+   *     console.log(`${step.stepType}: ${step.gasUnits} units ($${step.gasUsd})`);
+   *   }
+   * }
+   * ```
+   */
+  getGasEstimate(quote: Quote): GasEstimate {
+    return quote.fees.gasEstimate;
   }
 
   /**
