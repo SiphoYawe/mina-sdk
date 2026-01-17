@@ -23,21 +23,34 @@
     "lifi",
     "react",
     "hooks",
-    "provider"
+    "provider",
+    "web3",
+    "ethereum",
+    "typescript"
   ],
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
     },
     "./react": {
-      "types": "./dist/react.d.ts",
-      "import": "./dist/react.mjs",
-      "require": "./dist/react.js"
+      "import": {
+        "types": "./dist/react.d.mts",
+        "default": "./dist/react.mjs"
+      },
+      "require": {
+        "types": "./dist/react.d.ts",
+        "default": "./dist/react.js"
+      }
     }
   },
   "files": [
@@ -46,15 +59,17 @@
     "LICENSE"
   ],
   "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "lint": "tsc --noEmit",
-    "clean": "rm -rf dist",
-    "prepublishOnly": "pnpm run build"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm build"
   },
   "devDependencies": {
     "@types/react": "^18.2.48",
@@ -62,7 +77,7 @@
     "typescript": "^5.3.3"
   },
   "peerDependencies": {
-    "react": "^18.0.0"
+    "react": ">=18.0.0"
   },
   "peerDependenciesMeta": {
     "react": {
