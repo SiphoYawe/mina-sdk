@@ -95,6 +95,11 @@ function calculateMinimumReceived(toAmount: string, slippagePercent: number): st
  * @returns Formatted string with proper decimal places
  */
 function formatAmountWithDecimals(amount: string, decimals: number): string {
+  // Handle edge case of 0 decimals (rare but possible for some tokens)
+  if (decimals === 0) {
+    return amount;
+  }
+
   const amountBigInt = BigInt(amount);
   const divisor = BigInt(10 ** decimals);
   const wholePart = amountBigInt / divisor;
@@ -103,10 +108,11 @@ function formatAmountWithDecimals(amount: string, decimals: number): string {
   // Pad fractional part with leading zeros
   const fractionalStr = fractionalPart.toString().padStart(decimals, '0');
 
-  // Remove trailing zeros but keep at least 2 decimal places
+  // Remove trailing zeros but keep at least 2 decimal places (or all decimals if < 2)
   let trimmedFractional = fractionalStr.replace(/0+$/, '');
-  if (trimmedFractional.length < 2) {
-    trimmedFractional = fractionalStr.slice(0, 2);
+  const minDecimals = Math.min(2, decimals);
+  if (trimmedFractional.length < minDecimals) {
+    trimmedFractional = fractionalStr.slice(0, minDecimals);
   }
 
   return `${wholePart}.${trimmedFractional}`;
@@ -518,6 +524,17 @@ async function validateQuoteParams(params: QuoteParams, chainCache?: ChainCache)
           min: SLIPPAGE_CONSTRAINTS.MIN,
           max: SLIPPAGE_CONSTRAINTS.MAX,
         }
+      );
+    }
+  }
+
+  // Validate routePreference if provided
+  if (params.routePreference !== undefined) {
+    const validPreferences = ['recommended', 'fastest', 'cheapest'];
+    if (!validPreferences.includes(params.routePreference)) {
+      throw new InvalidQuoteParamsError(
+        'routePreference',
+        `Must be one of: ${validPreferences.join(', ')}`
       );
     }
   }
@@ -1076,10 +1093,20 @@ function getRouteExecutionTime(route: LifiRoute): number {
 }
 
 /**
- * Calculate total fees for a route in USD
+ * Calculate total fees for a route in USD (gas + bridge + protocol fees)
+ * Returns the total as a formatted string for display
  */
 function getRouteTotalFees(route: LifiRoute): string {
-  return route.gasCostUSD ?? '0';
+  const fees = calculateFeesFromRoute(route);
+  return fees.totalUsd.toFixed(2);
+}
+
+/**
+ * Get total fees in USD as a number for comparison
+ */
+function getRouteTotalFeesNumber(route: LifiRoute): number {
+  const fees = calculateFeesFromRoute(route);
+  return fees.totalUsd;
 }
 
 /**
@@ -1118,7 +1145,7 @@ function classifyRoute(route: LifiRoute, allRoutes: LifiRoute[]): RoutePreferenc
   }
 
   const routeTime = getRouteExecutionTime(route);
-  const routeFees = parseFloat(getRouteTotalFees(route));
+  const routeFees = getRouteTotalFeesNumber(route);
 
   // Find fastest and cheapest routes
   let fastestTime = Infinity;
@@ -1126,14 +1153,15 @@ function classifyRoute(route: LifiRoute, allRoutes: LifiRoute[]): RoutePreferenc
 
   for (const r of allRoutes) {
     const time = getRouteExecutionTime(r);
-    const fees = parseFloat(getRouteTotalFees(r));
+    const fees = getRouteTotalFeesNumber(r);
     if (time < fastestTime) fastestTime = time;
     if (fees < cheapestFees) cheapestFees = fees;
   }
 
-  // Classify based on characteristics (with small tolerance for comparison)
-  const timeTolerance = fastestTime * 0.05; // 5% tolerance
-  const feeTolerance = cheapestFees * 0.05; // 5% tolerance
+  // Classify based on characteristics (with tolerance to handle edge cases)
+  // Use minimum tolerances to avoid division issues with zero values
+  const timeTolerance = Math.max(fastestTime * 0.05, 1); // At least 1 second tolerance
+  const feeTolerance = Math.max(cheapestFees * 0.05, 0.01); // At least $0.01 tolerance
 
   if (routeTime <= fastestTime + timeTolerance) {
     return 'fastest';
@@ -1231,6 +1259,10 @@ async function fetchRoutesFromApi(
   const url = buildRoutesUrl();
   const preference = params.routePreference ?? DEFAULT_ROUTE_PREFERENCE;
 
+  // Convert slippage from percentage format (0.5 = 0.5%) to decimal format (0.005 = 0.5%)
+  // LI.FI routes API expects decimal format in the POST body
+  const slippageDecimal = resolveSlippageTolerance(params) / 100;
+
   const body = {
     fromChainId: params.fromChainId,
     toChainId: params.toChainId,
@@ -1240,7 +1272,7 @@ async function fetchRoutesFromApi(
     fromAddress: params.fromAddress,
     toAddress: params.toAddress ?? params.fromAddress,
     options: {
-      slippage: resolveSlippageTolerance(params),
+      slippage: slippageDecimal,
       order: LIFI_ORDER_MAP[preference],
     },
   };
