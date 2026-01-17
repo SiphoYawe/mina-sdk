@@ -2,7 +2,65 @@
  * Chain IDs for Hyperliquid ecosystem
  */
 export const HYPEREVM_CHAIN_ID = 999;
+export const HYPEREVM_TESTNET_CHAIN_ID = 998;
 export const HYPERLIQUID_CHAIN_ID = 1337;
+
+/**
+ * Network type
+ */
+export type HyperliquidNetwork = 'mainnet' | 'testnet';
+
+/**
+ * Network configuration for mainnet and testnet
+ */
+export interface NetworkConfig {
+  chainId: number;
+  rpcUrl: string;
+  apiUrl: string;
+  infoUrl: string;
+  explorerUrl: string;
+}
+
+/**
+ * Network configurations for Hyperliquid ecosystem
+ */
+export const NETWORK_CONFIG: Record<HyperliquidNetwork, NetworkConfig> = {
+  mainnet: {
+    chainId: 999,
+    rpcUrl: 'https://rpc.hyperliquid.xyz/evm',
+    apiUrl: 'https://api.hyperliquid.xyz',
+    infoUrl: 'https://api.hyperliquid.xyz/info',
+    explorerUrl: 'https://explorer.hyperliquid.xyz',
+  },
+  testnet: {
+    chainId: 998,
+    rpcUrl: 'https://rpc.hyperliquid-testnet.xyz/evm',
+    apiUrl: 'https://api.hyperliquid-testnet.xyz',
+    infoUrl: 'https://api.hyperliquid-testnet.xyz/info',
+    explorerUrl: 'https://explorer.hyperliquid-testnet.xyz',
+  },
+};
+
+/**
+ * Get network configuration by chain ID
+ * @param chainId - The chain ID (998 for testnet, 999 for mainnet)
+ * @returns The network configuration
+ */
+export function getNetworkConfig(chainId: number): NetworkConfig {
+  if (chainId === HYPEREVM_TESTNET_CHAIN_ID) {
+    return NETWORK_CONFIG.testnet;
+  }
+  return NETWORK_CONFIG.mainnet;
+}
+
+/**
+ * Get network type from chain ID
+ * @param chainId - The chain ID
+ * @returns 'testnet' or 'mainnet'
+ */
+export function getNetworkType(chainId: number): HyperliquidNetwork {
+  return chainId === HYPEREVM_TESTNET_CHAIN_ID ? 'testnet' : 'mainnet';
+}
 
 /**
  * Native token address (zero address for native gas token)

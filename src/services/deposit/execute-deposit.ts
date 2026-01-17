@@ -6,7 +6,7 @@
  * @see https://developers.circle.com/cctp/references/coredepositwallet-contract-interface
  */
 
-import { HYPEREVM_CHAIN_ID, HYPEREVM_USDC_ADDRESS } from '../../constants';
+import { HYPEREVM_CHAIN_ID, HYPEREVM_USDC_ADDRESS, getNetworkConfig } from '../../constants';
 import { MinaError, NetworkError, InsufficientBalanceError, UserRejectedError } from '../../errors';
 
 /**
@@ -43,9 +43,12 @@ function isUserRejection(error: unknown): boolean {
 export const CORE_DEPOSIT_WALLET_ADDRESS = '0x6B9E773128f453f5c2C60935Ee2DE2CBc5390A24' as const;
 
 /**
- * HyperEVM RPC endpoint
+ * Get HyperEVM RPC URL based on chain ID
+ * @param chainId - Chain ID (998=testnet, 999=mainnet)
  */
-const HYPEREVM_RPC_URL = 'https://api.hyperliquid.xyz/evm';
+function getHyperEvmRpcUrl(chainId: number = HYPEREVM_CHAIN_ID): string {
+  return getNetworkConfig(chainId).rpcUrl;
+}
 
 /**
  * USDC decimals
@@ -404,9 +407,13 @@ function encodeFunctionData(
 
 /**
  * Make an eth_call to read contract state
+ * @param to - Contract address
+ * @param data - Encoded call data
+ * @param chainId - Chain ID for network selection (998=testnet, 999=mainnet)
  */
-async function ethCall(to: string, data: string): Promise<string> {
-  const response = await fetch(HYPEREVM_RPC_URL, {
+async function ethCall(to: string, data: string, chainId?: number): Promise<string> {
+  const rpcUrl = getHyperEvmRpcUrl(chainId);
+  const response = await fetch(rpcUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -419,7 +426,7 @@ async function ethCall(to: string, data: string): Promise<string> {
 
   if (!response.ok) {
     throw new NetworkError('RPC call failed', {
-      endpoint: HYPEREVM_RPC_URL,
+      endpoint: rpcUrl,
       statusCode: response.status,
     });
   }
@@ -427,7 +434,7 @@ async function ethCall(to: string, data: string): Promise<string> {
   const result = await response.json();
   if (result.error) {
     throw new NetworkError(`RPC error: ${result.error.message}`, {
-      endpoint: HYPEREVM_RPC_URL,
+      endpoint: rpcUrl,
     });
   }
 
@@ -436,9 +443,12 @@ async function ethCall(to: string, data: string): Promise<string> {
 
 /**
  * Get the native HYPE balance for gas
+ * @param address - Wallet address
+ * @param chainId - Chain ID for network selection (998=testnet, 999=mainnet)
  */
-async function getGasBalance(address: string): Promise<string> {
-  const response = await fetch(HYPEREVM_RPC_URL, {
+async function getGasBalance(address: string, chainId?: number): Promise<string> {
+  const rpcUrl = getHyperEvmRpcUrl(chainId);
+  const response = await fetch(rpcUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -451,7 +461,7 @@ async function getGasBalance(address: string): Promise<string> {
 
   if (!response.ok) {
     throw new NetworkError('Failed to get gas balance', {
-      endpoint: HYPEREVM_RPC_URL,
+      endpoint: rpcUrl,
       statusCode: response.status,
     });
   }
@@ -459,7 +469,7 @@ async function getGasBalance(address: string): Promise<string> {
   const result = await response.json();
   if (result.error) {
     throw new NetworkError(`RPC error: ${result.error.message}`, {
-      endpoint: HYPEREVM_RPC_URL,
+      endpoint: rpcUrl,
     });
   }
 
@@ -473,10 +483,12 @@ async function getGasBalance(address: string): Promise<string> {
 
 /**
  * Get USDC balance on HyperEVM
+ * @param address - Wallet address
+ * @param chainId - Chain ID for network selection (998=testnet, 999=mainnet)
  */
-async function getUsdcBalance(address: string): Promise<string> {
+async function getUsdcBalance(address: string, chainId?: number): Promise<string> {
   const data = encodeFunctionData('balanceOf', [address]);
-  const result = await ethCall(HYPEREVM_USDC_ADDRESS, data);
+  const result = await ethCall(HYPEREVM_USDC_ADDRESS, data, chainId);
 
   if (!result || result === '0x') {
     return '0';
@@ -487,10 +499,12 @@ async function getUsdcBalance(address: string): Promise<string> {
 
 /**
  * Get current USDC allowance for CoreDepositWallet
+ * @param ownerAddress - Wallet address
+ * @param chainId - Chain ID for network selection (998=testnet, 999=mainnet)
  */
-async function getAllowance(ownerAddress: string): Promise<string> {
+async function getAllowance(ownerAddress: string, chainId?: number): Promise<string> {
   const data = encodeFunctionData('allowance', [ownerAddress, CORE_DEPOSIT_WALLET_ADDRESS]);
-  const result = await ethCall(HYPEREVM_USDC_ADDRESS, data);
+  const result = await ethCall(HYPEREVM_USDC_ADDRESS, data, chainId);
 
   if (!result || result === '0x') {
     return '0';
@@ -501,14 +515,20 @@ async function getAllowance(ownerAddress: string): Promise<string> {
 
 /**
  * Wait for a transaction to be mined using polling
+ * @param txHash - Transaction hash
+ * @param chainId - Chain ID for network selection (998=testnet, 999=mainnet)
+ * @param maxAttempts - Maximum polling attempts
+ * @param intervalMs - Polling interval in milliseconds
  */
 async function waitForTransaction(
   txHash: string,
+  chainId?: number,
   maxAttempts = 60,
   intervalMs = 2000
 ): Promise<{ status: 'success' | 'reverted'; blockNumber: bigint; gasUsed: bigint }> {
+  const rpcUrl = getHyperEvmRpcUrl(chainId);
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const response = await fetch(HYPEREVM_RPC_URL, {
+    const response = await fetch(rpcUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -538,7 +558,7 @@ async function waitForTransaction(
   }
 
   throw new NetworkError('Transaction receipt timeout', {
-    endpoint: HYPEREVM_RPC_URL,
+    endpoint: rpcUrl,
   });
 }
 

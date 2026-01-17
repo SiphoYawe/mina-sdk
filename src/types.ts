@@ -59,6 +59,8 @@ export interface MinaConfig {
   defaultSlippage?: number;
   /** LI.FI API key for higher rate limits (optional) */
   lifiApiKey?: string;
+  /** Hyperliquid network: 'mainnet' (default) or 'testnet' */
+  network?: 'mainnet' | 'testnet';
 }
 
 /**

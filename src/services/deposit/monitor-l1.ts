@@ -7,14 +7,22 @@
  * is confirmed and reflected in the user's trading account balance.
  */
 
-import { HYPERLIQUID_CHAIN_ID } from '../../constants';
+import { HYPERLIQUID_CHAIN_ID, HYPEREVM_CHAIN_ID, getNetworkConfig } from '../../constants';
 import { MinaError, NetworkError } from '../../errors';
 import type { DepositResult } from './execute-deposit';
 
 /**
- * Hyperliquid Info API endpoint
+ * Hyperliquid Info API endpoint (mainnet default, for backward compatibility)
  */
 export const HYPERLIQUID_INFO_API = 'https://api.hyperliquid.xyz/info';
+
+/**
+ * Get Hyperliquid Info API URL based on chain ID
+ * @param chainId - HyperEVM chain ID (998=testnet, 999=mainnet)
+ */
+function getHyperliquidInfoApi(chainId: number = HYPEREVM_CHAIN_ID): string {
+  return getNetworkConfig(chainId).infoUrl;
+}
 
 /**
  * Default timeout for L1 confirmation monitoring (2 minutes)
@@ -56,6 +64,8 @@ export interface L1MonitorOptions {
   onProgress?: (progress: L1MonitorProgress) => void;
   /** Callback when timeout warning is emitted (monitoring continues) */
   onTimeoutWarning?: (warning: L1TimeoutWarning) => void;
+  /** HyperEVM chain ID for network selection (998=testnet, 999=mainnet) */
+  chainId?: number;
 }
 
 /**
@@ -311,11 +321,12 @@ interface ClearinghouseState {
  * and extract the account value (total equity).
  *
  * @param walletAddress - The wallet address to check
+ * @param chainId - Optional HyperEVM chain ID for network selection (998=testnet, 999=mainnet)
  * @returns Account value in smallest units (raw USD * 10^6)
  * @throws InvalidL1AddressError if address format is invalid
  * @throws NetworkError if API request fails
  */
-export async function getHyperliquidBalance(walletAddress: string): Promise<string> {
+export async function getHyperliquidBalance(walletAddress: string, chainId?: number): Promise<string> {
   // Validate address format
   if (!isValidAddress(walletAddress)) {
     throw new InvalidL1AddressError(
@@ -324,8 +335,10 @@ export async function getHyperliquidBalance(walletAddress: string): Promise<stri
     );
   }
 
+  const infoApiUrl = getHyperliquidInfoApi(chainId);
+
   try {
-    const response = await fetch(HYPERLIQUID_INFO_API, {
+    const response = await fetch(infoApiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -338,7 +351,7 @@ export async function getHyperliquidBalance(walletAddress: string): Promise<stri
 
     if (!response.ok) {
       throw new NetworkError('Failed to fetch Hyperliquid balance', {
-        endpoint: HYPERLIQUID_INFO_API,
+        endpoint: infoApiUrl,
         statusCode: response.status,
       });
     }
@@ -350,7 +363,7 @@ export async function getHyperliquidBalance(walletAddress: string): Promise<stri
     } catch (parseError) {
       throw new NetworkError(
         `Failed to parse Hyperliquid API response: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
-        { endpoint: HYPERLIQUID_INFO_API }
+        { endpoint: infoApiUrl }
       );
     }
 
@@ -373,7 +386,7 @@ export async function getHyperliquidBalance(walletAddress: string): Promise<stri
       throw error;
     }
     throw new NetworkError('Failed to fetch Hyperliquid balance', {
-      endpoint: HYPERLIQUID_INFO_API,
+      endpoint: infoApiUrl,
     });
   }
 }
@@ -382,11 +395,12 @@ export async function getHyperliquidBalance(walletAddress: string): Promise<stri
  * Check if a Hyperliquid account exists (has any activity)
  *
  * @param walletAddress - The wallet address to check
+ * @param chainId - Optional HyperEVM chain ID for network selection (998=testnet, 999=mainnet)
  * @returns Whether the account has any trading history
  */
-export async function checkHyperliquidAccountExists(walletAddress: string): Promise<boolean> {
+export async function checkHyperliquidAccountExists(walletAddress: string, chainId?: number): Promise<boolean> {
   try {
-    const balance = await getHyperliquidBalance(walletAddress);
+    const balance = await getHyperliquidBalance(walletAddress, chainId);
     return BigInt(balance) > 0n;
   } catch {
     return false;
@@ -453,6 +467,7 @@ export function monitorL1Confirmation(
     pollInterval = L1_POLL_INTERVAL_MS,
     onProgress,
     onTimeoutWarning,
+    chainId,
   } = options;
 
   const startTime = Date.now();
@@ -484,7 +499,7 @@ export function monitorL1Confirmation(
   // Start monitoring loop (runs asynchronously)
   const resultPromise = (async (): Promise<L1ConfirmationResult> => {
     // Get initial balance
-    const initialBalance = await getHyperliquidBalance(walletAddress);
+    const initialBalance = await getHyperliquidBalance(walletAddress, chainId);
     let currentBalance = initialBalance;
 
     while (true) {
@@ -508,7 +523,7 @@ export function monitorL1Confirmation(
       }
 
       try {
-        currentBalance = await getHyperliquidBalance(walletAddress);
+        currentBalance = await getHyperliquidBalance(walletAddress, chainId);
 
         // Emit progress
         if (onProgress) {
@@ -723,15 +738,16 @@ export function createBridgeCompleteSummary(params: {
  * Get current L1 trading account balance (one-time check)
  *
  * @param walletAddress - The wallet address to check
+ * @param hyperEvmChainId - Optional HyperEVM chain ID for network selection (998=testnet, 999=mainnet)
  * @returns Current balance information
  * @throws InvalidL1AddressError if address format is invalid
  */
-export async function getL1TradingBalance(walletAddress: string): Promise<{
+export async function getL1TradingBalance(walletAddress: string, hyperEvmChainId?: number): Promise<{
   balance: string;
   balanceFormatted: string;
   chainId: number;
 }> {
-  const balance = await getHyperliquidBalance(walletAddress);
+  const balance = await getHyperliquidBalance(walletAddress, hyperEvmChainId);
   return {
     balance,
     balanceFormatted: formatAmount(balance, L1_USDC_DECIMALS),

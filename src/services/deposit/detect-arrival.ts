@@ -3,7 +3,7 @@
  * Monitors for bridged USDC arrival on HyperEVM (chain 999)
  */
 
-import { HYPEREVM_CHAIN_ID, HYPEREVM_USDC_ADDRESS, LIFI_API_URL } from '../../constants';
+import { HYPEREVM_CHAIN_ID, HYPEREVM_USDC_ADDRESS, LIFI_API_URL, getNetworkConfig } from '../../constants';
 import { MinaError, NetworkError } from '../../errors';
 
 /**
@@ -53,6 +53,8 @@ export interface DetectionOptions {
   onPoll?: (attempt: number, currentBalance: string) => void;
   /** Expected minimum amount (optional, for validation) */
   expectedAmount?: string;
+  /** HyperEVM chain ID for network selection (998=testnet, 999=mainnet) */
+  chainId?: number;
 }
 
 /**
@@ -111,11 +113,13 @@ function formatAmount(amount: string, decimals: number): string {
 
 /**
  * Get USDC balance on HyperEVM via LI.FI API
+ * @param walletAddress - Wallet address to check
+ * @param chainId - Chain ID for network selection (998=testnet, 999=mainnet)
  */
-async function getUsdcBalance(walletAddress: string): Promise<string> {
+async function getUsdcBalance(walletAddress: string, chainId: number = HYPEREVM_CHAIN_ID): Promise<string> {
   const url = `${LIFI_API_URL}/token/balance`;
   const params = new URLSearchParams({
-    chain: HYPEREVM_CHAIN_ID.toString(),
+    chain: chainId.toString(),
     token: HYPEREVM_USDC_ADDRESS,
     address: walletAddress,
   });
@@ -132,7 +136,7 @@ async function getUsdcBalance(walletAddress: string): Promise<string> {
       // Try alternative endpoint format
       const altUrl = `${LIFI_API_URL}/token`;
       const altParams = new URLSearchParams({
-        chain: HYPEREVM_CHAIN_ID.toString(),
+        chain: chainId.toString(),
         token: HYPEREVM_USDC_ADDRESS,
       });
 
@@ -156,23 +160,26 @@ async function getUsdcBalance(walletAddress: string): Promise<string> {
     }
 
     // Fallback: try to get balance directly
-    return await getUsdcBalanceDirect(walletAddress);
+    return await getUsdcBalanceDirect(walletAddress, chainId);
   } catch (error) {
     if (error instanceof NetworkError) {
       throw error;
     }
     // Fallback to direct RPC call
-    return await getUsdcBalanceDirect(walletAddress);
+    return await getUsdcBalanceDirect(walletAddress, chainId);
   }
 }
 
 /**
  * Get USDC balance directly via RPC (fallback method)
  * Uses eth_call to read balanceOf from the USDC contract
+ * @param walletAddress - Wallet address to check
+ * @param chainId - Chain ID for network selection (998=testnet, 999=mainnet)
  */
-async function getUsdcBalanceDirect(walletAddress: string): Promise<string> {
-  // HyperEVM RPC endpoint
-  const rpcUrl = 'https://api.hyperliquid.xyz/evm';
+async function getUsdcBalanceDirect(walletAddress: string, chainId: number = HYPEREVM_CHAIN_ID): Promise<string> {
+  // HyperEVM RPC endpoint - dynamic based on network
+  const networkConfig = getNetworkConfig(chainId);
+  const rpcUrl = networkConfig.rpcUrl;
 
   // ERC20 balanceOf function selector: 0x70a08231
   // Padded address (remove 0x, pad to 32 bytes)
@@ -270,20 +277,21 @@ export async function detectUsdcArrival(
     pollInterval = ARRIVAL_POLL_INTERVAL_MS,
     onPoll,
     expectedAmount,
+    chainId,
   } = options;
 
   const startTime = Date.now();
   let attempt = 0;
 
   // Get initial balance snapshot
-  const initialBalance = await getUsdcBalance(walletAddress);
+  const initialBalance = await getUsdcBalance(walletAddress, chainId);
   let lastBalance = initialBalance;
 
   while (Date.now() - startTime < timeout) {
     attempt++;
 
     try {
-      const currentBalance = await getUsdcBalance(walletAddress);
+      const currentBalance = await getUsdcBalance(walletAddress, chainId);
       lastBalance = currentBalance;
 
       // Notify callback
@@ -348,6 +356,7 @@ export async function detectUsdcArrival(
  * Call this before initiating a bridge to capture the starting balance.
  *
  * @param walletAddress - The wallet address to snapshot
+ * @param chainId - Optional HyperEVM chain ID for network selection (998=testnet, 999=mainnet)
  * @returns The current USDC balance on HyperEVM
  *
  * @example
@@ -357,8 +366,8 @@ export async function detectUsdcArrival(
  * const result = await detectUsdcArrivalFromSnapshot('0x...', preBalance);
  * ```
  */
-export async function snapshotUsdcBalance(walletAddress: string): Promise<string> {
-  return getUsdcBalance(walletAddress);
+export async function snapshotUsdcBalance(walletAddress: string, chainId?: number): Promise<string> {
+  return getUsdcBalance(walletAddress, chainId);
 }
 
 /**
@@ -382,6 +391,7 @@ export async function detectUsdcArrivalFromSnapshot(
     pollInterval = ARRIVAL_POLL_INTERVAL_MS,
     onPoll,
     expectedAmount,
+    chainId,
   } = options;
 
   const startTime = Date.now();
@@ -392,7 +402,7 @@ export async function detectUsdcArrivalFromSnapshot(
     attempt++;
 
     try {
-      const currentBalance = await getUsdcBalance(walletAddress);
+      const currentBalance = await getUsdcBalance(walletAddress, chainId);
       lastBalance = currentBalance;
 
       // Notify callback
@@ -448,19 +458,20 @@ export async function detectUsdcArrivalFromSnapshot(
  * Check USDC balance on HyperEVM (one-time check, no polling)
  *
  * @param walletAddress - The wallet address to check
+ * @param chainId - Optional HyperEVM chain ID for network selection (998=testnet, 999=mainnet)
  * @returns Current USDC balance details
  */
-export async function checkUsdcBalance(walletAddress: string): Promise<{
+export async function checkUsdcBalance(walletAddress: string, chainId: number = HYPEREVM_CHAIN_ID): Promise<{
   balance: string;
   balanceFormatted: string;
   chainId: number;
   tokenAddress: string;
 }> {
-  const balance = await getUsdcBalance(walletAddress);
+  const balance = await getUsdcBalance(walletAddress, chainId);
   return {
     balance,
     balanceFormatted: formatAmount(balance, USDC_DECIMALS),
-    chainId: HYPEREVM_CHAIN_ID,
+    chainId,
     tokenAddress: HYPEREVM_USDC_ADDRESS,
   };
 }
