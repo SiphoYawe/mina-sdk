@@ -6,6 +6,8 @@ The official SDK for Mina Bridge - cross-chain bridging to Hyperliquid.
 [![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+📖 **[Full Documentation](https://mina-169e3f09.mintlify.app/)**
+
 ## Features
 
 - Cross-chain bridging from 40+ chains to Hyperliquid
