@@ -5,6 +5,7 @@
 
 import type { Chain, Token } from '../types';
 import { HYPEREVM_CHAIN_ID, LIFI_API_URL, NATIVE_TOKEN_ADDRESS, CHAIN_API_TIMEOUT_MS } from '../constants';
+import { getLifiHeaders } from '../config';
 
 /**
  * LI.FI API Chain response types
@@ -253,7 +254,10 @@ async function fetchWithTimeout(url: string, timeoutMs: number = API_TIMEOUT_MS)
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: getLifiHeaders(),
+    });
     return response;
   } catch (error) {
     // Handle abort errors with a descriptive timeout message (Issue 4 fix)

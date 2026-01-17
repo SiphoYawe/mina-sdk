@@ -57,6 +57,8 @@ export interface MinaConfig {
   autoDeposit?: boolean;
   /** Default slippage tolerance (0.005 = 0.5%) */
   defaultSlippage?: number;
+  /** LI.FI API key for higher rate limits (optional) */
+  lifiApiKey?: string;
 }
 
 /**

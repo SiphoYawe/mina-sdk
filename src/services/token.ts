@@ -12,6 +12,7 @@ import {
   HYPEREVM_USDC_ADDRESS,
   TOKEN_API_TIMEOUT_MS,
 } from '../constants';
+import { getLifiHeaders } from '../config';
 
 /**
  * LI.FI API Token response types
@@ -290,7 +291,10 @@ async function fetchWithTimeout(url: string, timeoutMs: number = API_TIMEOUT_MS)
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: getLifiHeaders(),
+    });
     return response;
   } catch (error) {
     // Handle abort errors with a descriptive timeout message

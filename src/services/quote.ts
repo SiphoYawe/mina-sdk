@@ -18,6 +18,7 @@ import {
 } from '../constants';
 import { MinaError, NoRouteFoundError, NetworkError, InvalidSlippageError } from '../errors';
 import { getChainById, ChainCache, createChainCache } from './chain';
+import { getLifiHeaders } from '../config';
 
 /**
  * Default route preference
@@ -1213,7 +1214,7 @@ async function fetchQuoteFromApi(
 ): Promise<LifiQuoteResponse> {
   const url = buildQuoteUrl(params);
 
-  const response = await fetchWithTimeout(url, undefined, timeoutMs);
+  const response = await fetchWithTimeout(url, { headers: getLifiHeaders() }, timeoutMs);
 
   if (!response.ok) {
     const errorBody = await response.text();
@@ -1281,7 +1282,7 @@ async function fetchRoutesFromApi(
     url,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getLifiHeaders(),
       body: JSON.stringify(body),
     },
     timeoutMs

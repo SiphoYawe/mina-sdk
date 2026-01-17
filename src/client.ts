@@ -14,6 +14,7 @@ import type {
   TransactionStatusPayload,
 } from './types';
 import { DEFAULT_SLIPPAGE, HYPEREVM_CHAIN_ID } from './constants';
+import { setSDKConfig } from './config';
 import {
   SDKEventEmitter,
   SDK_EVENTS,
@@ -124,6 +125,13 @@ export class Mina {
       defaultSlippage: DEFAULT_SLIPPAGE,
       ...config,
     };
+
+    // Set global SDK config (for API keys, integrator ID)
+    setSDKConfig({
+      lifiApiKey: config.lifiApiKey,
+      integrator: config.integrator,
+    });
+
     // Each Mina client instance gets its own cache to avoid shared state issues
     this.chainCache = createChainCache();
     this.tokenCache = createTokenCache();

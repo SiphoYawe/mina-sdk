@@ -12,6 +12,7 @@ import {
   BALANCE_CACHE_TTL_MS,
   BALANCE_DEBOUNCE_MS,
 } from '../constants';
+import { getLifiHeaders } from '../config';
 
 /**
  * Validate an Ethereum address format
@@ -349,7 +350,10 @@ async function fetchWithTimeout(url: string, timeoutMs: number = BALANCE_API_TIM
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: getLifiHeaders(),
+    });
     return response;
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
