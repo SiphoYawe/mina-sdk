@@ -3,7 +3,8 @@
  * Fetches optimal bridge routes from LI.FI API
  */
 
-import type { Token, Quote, QuoteParams, Step, Fees, FeeItem, GasEstimate, StepGas } from '../types';
+import type { Token, Quote, QuoteParams, Step, Fees, FeeItem, GasEstimate, StepGas, RoutePreference, RouteComparison } from '../types';
+import { SLIPPAGE_CONSTRAINTS } from '../types';
 import {
   LIFI_API_URL,
   HYPEREVM_CHAIN_ID,
@@ -15,8 +16,101 @@ import {
   PRICE_IMPACT_HIGH,
   PRICE_IMPACT_VERY_HIGH,
 } from '../constants';
-import { MinaError, NoRouteFoundError, NetworkError } from '../errors';
+import { MinaError, NoRouteFoundError, NetworkError, InvalidSlippageError } from '../errors';
 import { getChainById, ChainCache, createChainCache } from './chain';
+
+/**
+ * Default route preference
+ */
+const DEFAULT_ROUTE_PREFERENCE: RoutePreference = 'recommended';
+
+/**
+ * LI.FI order parameter mapping for route preference
+ * Maps our RoutePreference to LI.FI's order parameter values
+ */
+const LIFI_ORDER_MAP: Record<RoutePreference, string> = {
+  recommended: 'RECOMMENDED',
+  fastest: 'FASTEST',
+  cheapest: 'CHEAPEST',
+};
+
+/**
+ * Validate slippage tolerance value
+ * @param slippage - Slippage tolerance in percentage format (0.5 = 0.5%)
+ * @throws InvalidSlippageError if slippage is outside valid range
+ */
+function validateSlippage(slippage: number): void {
+  if (slippage < SLIPPAGE_CONSTRAINTS.MIN || slippage > SLIPPAGE_CONSTRAINTS.MAX) {
+    throw new InvalidSlippageError(
+      `Slippage must be between ${SLIPPAGE_CONSTRAINTS.MIN}% and ${SLIPPAGE_CONSTRAINTS.MAX}%`,
+      {
+        provided: slippage,
+        min: SLIPPAGE_CONSTRAINTS.MIN,
+        max: SLIPPAGE_CONSTRAINTS.MAX,
+      }
+    );
+  }
+}
+
+/**
+ * Resolve slippage from params, handling both slippageTolerance and legacy slippage
+ * @param params - Quote parameters
+ * @returns Slippage tolerance in percentage format (0.5 = 0.5%)
+ */
+function resolveSlippageTolerance(params: QuoteParams): number {
+  // Prefer slippageTolerance (percentage format: 0.5 = 0.5%)
+  if (params.slippageTolerance !== undefined) {
+    return params.slippageTolerance;
+  }
+
+  // Fall back to legacy slippage (decimal format: 0.005 = 0.5%)
+  if (params.slippage !== undefined) {
+    // Convert decimal to percentage (0.005 → 0.5)
+    return params.slippage * 100;
+  }
+
+  // Default slippage tolerance
+  return SLIPPAGE_CONSTRAINTS.DEFAULT;
+}
+
+/**
+ * Calculate minimum received amount based on expected output and slippage
+ * @param toAmount - Expected output amount (in smallest unit)
+ * @param slippagePercent - Slippage tolerance in percentage format (0.5 = 0.5%)
+ * @returns Minimum received amount as string
+ */
+function calculateMinimumReceived(toAmount: string, slippagePercent: number): string {
+  const amount = BigInt(toAmount);
+  // Calculate factor: (100 - slippage%) * 100 for precision
+  const slippageFactor = BigInt(Math.floor((100 - slippagePercent) * 100));
+  // minReceived = amount * (100 - slippage) / 100
+  const minReceived = (amount * slippageFactor) / 10000n;
+  return minReceived.toString();
+}
+
+/**
+ * Format amount with decimals for display
+ * @param amount - Amount in smallest unit (e.g., wei)
+ * @param decimals - Token decimals
+ * @returns Formatted string with proper decimal places
+ */
+function formatAmountWithDecimals(amount: string, decimals: number): string {
+  const amountBigInt = BigInt(amount);
+  const divisor = BigInt(10 ** decimals);
+  const wholePart = amountBigInt / divisor;
+  const fractionalPart = amountBigInt % divisor;
+
+  // Pad fractional part with leading zeros
+  const fractionalStr = fractionalPart.toString().padStart(decimals, '0');
+
+  // Remove trailing zeros but keep at least 2 decimal places
+  let trimmedFractional = fractionalStr.replace(/0+$/, '');
+  if (trimmedFractional.length < 2) {
+    trimmedFractional = fractionalStr.slice(0, 2);
+  }
+
+  return `${wholePart}.${trimmedFractional}`;
+}
 
 /**
  * LI.FI API Quote response types
@@ -217,7 +311,9 @@ class QuoteCache {
    * Generate cache key from params
    */
   private getKey(params: QuoteParams): string {
-    return `${params.fromChainId}-${params.toChainId}-${params.fromToken}-${params.toToken}-${params.fromAmount}-${params.fromAddress}-${params.slippage ?? DEFAULT_SLIPPAGE}`;
+    // Use resolved slippage tolerance for consistent cache keys
+    const slippage = resolveSlippageTolerance(params);
+    return `${params.fromChainId}-${params.toChainId}-${params.fromToken}-${params.toToken}-${params.fromAmount}-${params.fromAddress}-${slippage}-${params.routePreference ?? DEFAULT_ROUTE_PREFERENCE}`;
   }
 
   /**
@@ -402,9 +498,27 @@ async function validateQuoteParams(params: QuoteParams, chainCache?: ChainCache)
     throw new InvalidQuoteParamsError('fromAddress', 'Must be a valid Ethereum address');
   }
 
+  // Validate slippageTolerance (percentage format: 0.5 = 0.5%)
+  if (params.slippageTolerance !== undefined) {
+    validateSlippage(params.slippageTolerance);
+  }
+
+  // Validate legacy slippage (decimal format: 0.005 = 0.5%)
   if (params.slippage !== undefined) {
     if (params.slippage < 0 || params.slippage > 1) {
       throw new InvalidQuoteParamsError('slippage', 'Must be between 0 and 1 (e.g., 0.005 for 0.5%)');
+    }
+    // Also validate when converted to percentage format
+    const slippagePercent = params.slippage * 100;
+    if (slippagePercent < SLIPPAGE_CONSTRAINTS.MIN || slippagePercent > SLIPPAGE_CONSTRAINTS.MAX) {
+      throw new InvalidSlippageError(
+        `Slippage must be between ${SLIPPAGE_CONSTRAINTS.MIN}% and ${SLIPPAGE_CONSTRAINTS.MAX}%`,
+        {
+          provided: slippagePercent,
+          min: SLIPPAGE_CONSTRAINTS.MIN,
+          max: SLIPPAGE_CONSTRAINTS.MAX,
+        }
+      );
     }
   }
 }
@@ -816,6 +930,12 @@ function mapLifiQuoteToQuote(
   // Quote expires in 60 seconds (LI.FI quotes are typically valid for ~60s)
   const expiresAt = Date.now() + 60000;
 
+  // Resolve and calculate slippage-related values
+  const slippageTolerance = resolveSlippageTolerance(params);
+  const toToken = mapLifiToken(lifiResponse.action.toToken);
+  const minimumReceived = calculateMinimumReceived(lifiResponse.estimate.toAmount, slippageTolerance);
+  const minimumReceivedFormatted = formatAmountWithDecimals(minimumReceived, toToken.decimals);
+
   return {
     id: quoteId,
     steps,
@@ -823,24 +943,30 @@ function mapLifiQuoteToQuote(
     estimatedTime,
     fromAmount: lifiResponse.estimate.fromAmount,
     toAmount: lifiResponse.estimate.toAmount,
+    slippageTolerance,
+    minimumReceived,
+    minimumReceivedFormatted,
     priceImpact,
     highImpact: isHighImpact(priceImpact),
     impactSeverity: getImpactSeverity(priceImpact),
     expiresAt,
     fromToken: mapLifiToken(lifiResponse.action.fromToken),
-    toToken: mapLifiToken(lifiResponse.action.toToken),
+    toToken,
     includesAutoDeposit: autoDeposit && params.toChainId === HYPEREVM_CHAIN_ID,
     manualDepositRequired: !autoDeposit && params.toChainId === HYPEREVM_CHAIN_ID,
+    routePreference: params.routePreference ?? DEFAULT_ROUTE_PREFERENCE,
+    alternativeRoutes: undefined, // Single quote doesn't have alternatives
   };
 }
 
 /**
- * Map LI.FI route response to our Quote type (Issue 6 fix)
+ * Map LI.FI route response to our Quote type with route preference support
  */
 function mapLifiRouteToQuote(
   lifiRoute: LifiRoute,
   params: QuoteParams,
-  autoDeposit: boolean
+  autoDeposit: boolean,
+  alternativeRoutes?: RouteComparison[]
 ): Quote {
   const steps = extractStepsFromRoute(lifiRoute);
   const fees = calculateFeesFromRoute(lifiRoute);
@@ -858,6 +984,12 @@ function mapLifiRouteToQuote(
   // Quote expires in 60 seconds
   const expiresAt = Date.now() + 60000;
 
+  // Resolve and calculate slippage-related values
+  const slippageTolerance = resolveSlippageTolerance(params);
+  const toToken = mapLifiToken(lifiRoute.toToken);
+  const minimumReceived = calculateMinimumReceived(lifiRoute.toAmount, slippageTolerance);
+  const minimumReceivedFormatted = formatAmountWithDecimals(minimumReceived, toToken.decimals);
+
   return {
     id: quoteId,
     steps,
@@ -865,15 +997,151 @@ function mapLifiRouteToQuote(
     estimatedTime,
     fromAmount: lifiRoute.fromAmount,
     toAmount: lifiRoute.toAmount,
+    slippageTolerance,
+    minimumReceived,
+    minimumReceivedFormatted,
     priceImpact,
     highImpact: isHighImpact(priceImpact),
     impactSeverity: getImpactSeverity(priceImpact),
     expiresAt,
     fromToken: mapLifiToken(lifiRoute.fromToken),
-    toToken: mapLifiToken(lifiRoute.toToken),
+    toToken,
     includesAutoDeposit: autoDeposit && params.toChainId === HYPEREVM_CHAIN_ID,
     manualDepositRequired: !autoDeposit && params.toChainId === HYPEREVM_CHAIN_ID,
+    routePreference: params.routePreference ?? DEFAULT_ROUTE_PREFERENCE,
+    alternativeRoutes,
   };
+}
+
+/**
+ * Select optimal route based on route preference
+ * @param routes - Available routes from LI.FI
+ * @param preference - Route selection preference
+ * @returns Selected route based on preference
+ */
+function selectOptimalRoute(
+  routes: LifiRoute[],
+  preference: RoutePreference
+): LifiRoute {
+  if (routes.length === 0) {
+    throw new NoRouteFoundError('No routes available', {
+      fromChainId: 0,
+      toChainId: 0,
+      fromToken: '',
+      toToken: '',
+    });
+  }
+
+  // If only one route, return it (guaranteed to exist after length check)
+  if (routes.length === 1) {
+    return routes[0] as LifiRoute;
+  }
+
+  // Sort routes based on preference - guaranteed to have elements after length check above
+  let sortedRoutes: LifiRoute[];
+  switch (preference) {
+    case 'fastest':
+      // Sort by estimated execution time (ascending)
+      sortedRoutes = [...routes].sort((a, b) => {
+        const aTime = a.steps.reduce((sum, step) => sum + (step.estimate.executionDuration || 0), 0);
+        const bTime = b.steps.reduce((sum, step) => sum + (step.estimate.executionDuration || 0), 0);
+        return aTime - bTime;
+      });
+      break;
+
+    case 'cheapest':
+      // Sort by total fees (gas + bridge + protocol) in USD (ascending)
+      sortedRoutes = [...routes].sort((a, b) => {
+        const aFees = calculateFeesFromRoute(a);
+        const bFees = calculateFeesFromRoute(b);
+        return aFees.totalUsd - bFees.totalUsd;
+      });
+      break;
+
+    case 'recommended':
+    default:
+      // LI.FI already returns routes sorted by recommendation
+      sortedRoutes = routes;
+      break;
+  }
+
+  return sortedRoutes[0] as LifiRoute;
+}
+
+/**
+ * Calculate total execution time for a route
+ */
+function getRouteExecutionTime(route: LifiRoute): number {
+  return route.steps.reduce((sum, step) => sum + (step.estimate.executionDuration || 0), 0);
+}
+
+/**
+ * Calculate total fees for a route in USD
+ */
+function getRouteTotalFees(route: LifiRoute): string {
+  return route.gasCostUSD ?? '0';
+}
+
+/**
+ * Build route comparison data from multiple routes
+ * @param routes - Available routes from LI.FI
+ * @param selectedRouteId - ID of the selected route (to exclude from alternatives)
+ * @returns Array of route comparisons (up to 3 alternatives)
+ */
+function buildRouteComparisons(
+  routes: LifiRoute[],
+  selectedRouteId: string
+): RouteComparison[] {
+  // Filter out the selected route and take up to 3 alternatives
+  const alternatives = routes
+    .filter(route => route.id !== selectedRouteId)
+    .slice(0, 3);
+
+  return alternatives.map(route => ({
+    type: classifyRoute(route, routes),
+    estimatedTime: getRouteExecutionTime(route),
+    totalFees: getRouteTotalFees(route),
+    outputAmount: route.toAmount,
+    routeId: route.id,
+  }));
+}
+
+/**
+ * Classify a route based on its characteristics relative to other routes
+ * @param route - Route to classify
+ * @param allRoutes - All available routes for comparison
+ * @returns Route preference classification
+ */
+function classifyRoute(route: LifiRoute, allRoutes: LifiRoute[]): RoutePreference {
+  if (allRoutes.length <= 1) {
+    return 'recommended';
+  }
+
+  const routeTime = getRouteExecutionTime(route);
+  const routeFees = parseFloat(getRouteTotalFees(route));
+
+  // Find fastest and cheapest routes
+  let fastestTime = Infinity;
+  let cheapestFees = Infinity;
+
+  for (const r of allRoutes) {
+    const time = getRouteExecutionTime(r);
+    const fees = parseFloat(getRouteTotalFees(r));
+    if (time < fastestTime) fastestTime = time;
+    if (fees < cheapestFees) cheapestFees = fees;
+  }
+
+  // Classify based on characteristics (with small tolerance for comparison)
+  const timeTolerance = fastestTime * 0.05; // 5% tolerance
+  const feeTolerance = cheapestFees * 0.05; // 5% tolerance
+
+  if (routeTime <= fastestTime + timeTolerance) {
+    return 'fastest';
+  }
+  if (routeFees <= cheapestFees + feeTolerance) {
+    return 'cheapest';
+  }
+  return 'recommended';
 }
 
 /**
@@ -893,8 +1161,8 @@ function buildQuoteUrl(params: QuoteParams): string {
     url.searchParams.set('toAddress', params.toAddress);
   }
 
-  // Convert slippage from decimal to percentage (0.005 -> 0.5)
-  const slippagePercent = (params.slippage ?? DEFAULT_SLIPPAGE) * 100;
+  // Use resolved slippage tolerance (already in percentage format: 0.5 = 0.5%)
+  const slippagePercent = resolveSlippageTolerance(params);
   url.searchParams.set('slippage', slippagePercent.toFixed(2));
 
   return url.toString();
@@ -954,13 +1222,14 @@ async function fetchQuoteFromApi(
 }
 
 /**
- * Fetch multiple quotes from LI.FI routes API (Issue 6 fix)
+ * Fetch multiple quotes from LI.FI routes API with route preference support
  */
 async function fetchRoutesFromApi(
   params: QuoteParams,
   timeoutMs: number = QUOTE_API_TIMEOUT_MS
 ): Promise<LifiRoute[]> {
   const url = buildRoutesUrl();
+  const preference = params.routePreference ?? DEFAULT_ROUTE_PREFERENCE;
 
   const body = {
     fromChainId: params.fromChainId,
@@ -971,8 +1240,8 @@ async function fetchRoutesFromApi(
     fromAddress: params.fromAddress,
     toAddress: params.toAddress ?? params.fromAddress,
     options: {
-      slippage: (params.slippage ?? DEFAULT_SLIPPAGE) * 100,
-      order: 'RECOMMENDED',
+      slippage: resolveSlippageTolerance(params),
+      order: LIFI_ORDER_MAP[preference],
     },
   };
 
@@ -1071,8 +1340,23 @@ export async function getQuote(
   }
 
   try {
-    const lifiResponse = await fetchQuoteFromApi(normalizedParams, timeoutMs);
-    const quote = mapLifiQuoteToQuote(lifiResponse, normalizedParams, autoDeposit);
+    // Fetch routes to get multiple options for comparison
+    const lifiRoutes = await fetchRoutesFromApi(normalizedParams, timeoutMs);
+
+    // Select optimal route based on preference
+    const preference = normalizedParams.routePreference ?? DEFAULT_ROUTE_PREFERENCE;
+    const selectedRoute = selectOptimalRoute(lifiRoutes, preference);
+
+    // Build alternative route comparisons
+    const alternativeRoutes = buildRouteComparisons(lifiRoutes, selectedRoute.id);
+
+    // Map to Quote with alternatives
+    const quote = mapLifiRouteToQuote(
+      selectedRoute,
+      normalizedParams,
+      autoDeposit,
+      alternativeRoutes.length > 0 ? alternativeRoutes : undefined
+    );
 
     // Cache the quote
     quoteCache.set(normalizedParams, quote);
@@ -1137,14 +1421,30 @@ export async function getQuotes(
   try {
     const lifiRoutes = await fetchRoutesFromApi(normalizedParams, timeoutMs);
 
-    // Issue 6 fix: Use route-specific mapping
-    const quotes = lifiRoutes.map((route) =>
-      mapLifiRouteToQuote(route, normalizedParams, autoDeposit)
-    );
+    // Map routes to quotes with alternative route comparisons
+    const quotes = lifiRoutes.map((route, index) => {
+      // Build alternatives excluding current route
+      const alternatives = buildRouteComparisons(lifiRoutes, route.id);
+      return mapLifiRouteToQuote(
+        route,
+        normalizedParams,
+        autoDeposit,
+        alternatives.length > 0 ? alternatives : undefined
+      );
+    });
+
+    // Determine recommended index based on route preference
+    const preference = normalizedParams.routePreference ?? DEFAULT_ROUTE_PREFERENCE;
+    let recommendedIndex = 0;
+    if (preference !== 'recommended' && lifiRoutes.length > 1) {
+      const selectedRoute = selectOptimalRoute(lifiRoutes, preference);
+      recommendedIndex = lifiRoutes.findIndex(r => r.id === selectedRoute.id);
+      if (recommendedIndex < 0) recommendedIndex = 0;
+    }
 
     return {
       quotes,
-      recommendedIndex: 0, // LI.FI returns routes sorted by recommendation
+      recommendedIndex,
     };
   } catch (error) {
     // Re-throw typed errors as-is

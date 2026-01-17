@@ -3,6 +3,49 @@
  */
 
 /**
+ * Slippage tolerance preset values (in percentage)
+ */
+export type SlippagePreset = 0.1 | 0.5 | 1.0;
+
+/**
+ * Slippage validation constraints
+ */
+export const SLIPPAGE_CONSTRAINTS = {
+  /** Minimum slippage tolerance: 0.01% */
+  MIN: 0.01,
+  /** Maximum slippage tolerance: 5.0% */
+  MAX: 5.0,
+  /** Default slippage tolerance: 0.5% */
+  DEFAULT: 0.5,
+  /** Preset slippage values */
+  PRESETS: [0.1, 0.5, 1.0] as const,
+} as const;
+
+/**
+ * Route preference for bridge quotes
+ * - recommended: Balance of speed and cost (default)
+ * - fastest: Prioritize routes with lowest estimated time
+ * - cheapest: Prioritize routes with lowest total fees
+ */
+export type RoutePreference = 'recommended' | 'fastest' | 'cheapest';
+
+/**
+ * Route comparison data for alternative routes
+ */
+export interface RouteComparison {
+  /** Route preference classification */
+  type: RoutePreference;
+  /** Estimated execution time in seconds */
+  estimatedTime: number;
+  /** Total fees in USD */
+  totalFees: string;
+  /** Expected output amount */
+  outputAmount: string;
+  /** Route ID for reference */
+  routeId: string;
+}
+
+/**
  * Configuration for the Mina client
  */
 export interface MinaConfig {
@@ -72,8 +115,19 @@ export interface QuoteParams {
   fromAddress: string;
   /** Destination address (defaults to fromAddress) */
   toAddress?: string;
-  /** Slippage tolerance (0.005 = 0.5%) */
+  /**
+   * Slippage tolerance in percentage format (e.g., 0.5 = 0.5%)
+   * Valid range: 0.01 to 5.0
+   * Preset values: 0.1, 0.5, 1.0
+   * Defaults to 0.5 if not specified
+   */
+  slippageTolerance?: number;
+  /**
+   * @deprecated Use slippageTolerance instead. Slippage in decimal format (0.005 = 0.5%)
+   */
   slippage?: number;
+  /** Route preference: 'recommended' | 'fastest' | 'cheapest' (defaults to 'recommended') */
+  routePreference?: RoutePreference;
 }
 
 /**
@@ -188,6 +242,12 @@ export interface Quote {
   fromAmount: string;
   /** Expected output amount */
   toAmount: string;
+  /** Slippage tolerance applied to this quote (percentage format, e.g., 0.5 = 0.5%) */
+  slippageTolerance: number;
+  /** Minimum amount to receive after slippage (in smallest unit) */
+  minimumReceived: string;
+  /** Minimum amount to receive formatted with decimals */
+  minimumReceivedFormatted: string;
   /** Price impact percentage (e.g., 0.01 = 1%) */
   priceImpact: number;
   /** Whether price impact exceeds HIGH threshold (1%) */
@@ -204,6 +264,10 @@ export interface Quote {
   includesAutoDeposit: boolean;
   /** Whether manual deposit is required (when autoDeposit is disabled for HyperEVM destination) */
   manualDepositRequired: boolean;
+  /** Route preference used for this quote */
+  routePreference: RoutePreference;
+  /** Alternative routes for comparison (up to 3 alternatives with time/fee data) */
+  alternativeRoutes?: RouteComparison[];
 }
 
 /**

@@ -10,9 +10,50 @@ export const HYPERLIQUID_CHAIN_ID = 1337;
 export const NATIVE_TOKEN_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 /**
- * Default slippage tolerance (0.5%)
+ * Slippage tolerance configuration (PERCENTAGE FORMAT)
+ * Values are in percentage format (0.5 = 0.5%)
+ * Used by the new slippageTolerance parameter
  */
+/** Minimum allowed slippage tolerance: 0.01% */
+export const MIN_SLIPPAGE_PERCENT = 0.01;
+/** Maximum allowed slippage tolerance: 5% */
+export const MAX_SLIPPAGE_PERCENT = 5.0;
+/** Default slippage tolerance: 0.5% */
+export const DEFAULT_SLIPPAGE_PERCENT = 0.5;
+/** Preset slippage options: 0.1%, 0.5%, 1.0% */
+export const SLIPPAGE_PRESETS_PERCENT = [0.1, 0.5, 1.0] as const;
+
+/**
+ * Slippage tolerance configuration (DECIMAL FORMAT)
+ * Values are in decimal format (0.005 = 0.5%)
+ * @deprecated Used by the legacy slippage parameter for backward compatibility
+ */
+/** Minimum allowed slippage tolerance (0.01%) */
+export const MIN_SLIPPAGE = 0.0001;
+/** Maximum allowed slippage tolerance (5%) */
+export const MAX_SLIPPAGE = 0.05;
+/** Default slippage tolerance (0.5%) */
 export const DEFAULT_SLIPPAGE = 0.005;
+/** Preset slippage options in decimal format */
+export const SLIPPAGE_PRESETS = [0.001, 0.005, 0.01] as const; // 0.1%, 0.5%, 1.0%
+
+/**
+ * Convert slippage from percentage to decimal format
+ * @param percent - Slippage in percentage (0.5 = 0.5%)
+ * @returns Slippage in decimal (0.005 = 0.5%)
+ */
+export function slippagePercentToDecimal(percent: number): number {
+  return percent / 100;
+}
+
+/**
+ * Convert slippage from decimal to percentage format
+ * @param decimal - Slippage in decimal (0.005 = 0.5%)
+ * @returns Slippage in percentage (0.5 = 0.5%)
+ */
+export function slippageDecimalToPercent(decimal: number): number {
+  return decimal * 100;
+}
 
 /**
  * USDC address on HyperEVM (Circle USDC Token)

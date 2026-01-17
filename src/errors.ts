@@ -24,7 +24,8 @@ export type RecoveryAction =
   | 'fetch_new_quote'
   | 'contact_support'
   | 'switch_network'
-  | 'check_allowance';
+  | 'check_allowance'
+  | 'adjust_slippage';
 
 /**
  * Recovery action mapping by error code
@@ -33,6 +34,7 @@ export const RECOVERY_ACTIONS: Record<string, RecoveryAction> = {
   INSUFFICIENT_BALANCE: 'add_funds',
   NO_ROUTE_FOUND: 'try_different_amount',
   SLIPPAGE_EXCEEDED: 'increase_slippage',
+  INVALID_SLIPPAGE: 'adjust_slippage',
   TRANSACTION_FAILED: 'retry',
   USER_REJECTED: 'try_again',
   NETWORK_ERROR: 'retry',
@@ -176,6 +178,36 @@ export class SlippageExceededError extends MinaError {
     this.expectedAmount = details.expectedAmount;
     this.actualAmount = details.actualAmount;
     this.slippageTolerance = details.slippageTolerance;
+  }
+}
+
+/**
+ * Error thrown when slippage tolerance value is invalid (outside 0.01-5.0 range)
+ */
+export class InvalidSlippageError extends MinaError {
+  readonly code = 'INVALID_SLIPPAGE' as const;
+  readonly recoverable = false as const;
+  readonly provided: number;
+  readonly min: number;
+  readonly max: number;
+
+  constructor(
+    message: string,
+    details: {
+      provided: number;
+      min: number;
+      max: number;
+    }
+  ) {
+    super(message, {
+      userMessage: `Slippage must be between ${details.min}% and ${details.max}%. You provided ${details.provided}%.`,
+      recoveryAction: 'adjust_slippage',
+      details,
+    });
+    this.name = 'InvalidSlippageError';
+    this.provided = details.provided;
+    this.min = details.min;
+    this.max = details.max;
   }
 }
 
@@ -380,6 +412,10 @@ export function isNoRouteFoundError(error: unknown): error is NoRouteFoundError 
 
 export function isSlippageExceededError(error: unknown): error is SlippageExceededError {
   return error instanceof SlippageExceededError;
+}
+
+export function isInvalidSlippageError(error: unknown): error is InvalidSlippageError {
+  return error instanceof InvalidSlippageError;
 }
 
 export function isTransactionFailedError(error: unknown): error is TransactionFailedError {

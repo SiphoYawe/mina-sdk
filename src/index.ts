@@ -33,7 +33,13 @@ export type {
   StepType,
   OnStepChange,
   OnStatusChange,
+  SlippagePreset,
+  RoutePreference,
+  RouteComparison,
 } from './types';
+
+// Slippage constraints for validation
+export { SLIPPAGE_CONSTRAINTS } from './types';
 
 // Event system
 export {
@@ -88,6 +94,7 @@ export {
   InsufficientBalanceError,
   NoRouteFoundError,
   SlippageExceededError,
+  InvalidSlippageError,
   TransactionFailedError,
   UserRejectedError,
   NetworkError,
@@ -100,6 +107,7 @@ export {
   isInsufficientBalanceError,
   isNoRouteFoundError,
   isSlippageExceededError,
+  isInvalidSlippageError,
   isTransactionFailedError,
   isUserRejectedError,
   isNetworkError,
