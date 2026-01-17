@@ -1,6 +1,6 @@
 {
   "name": "@siphoyawe/mina-sdk",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "Cross-chain bridge SDK for Hyperliquid - Bridge assets from 40+ chains with auto-deposit to your trading account",
   "author": "Mina Bridge Contributors",
   "license": "MIT",
@@ -20,7 +20,10 @@
     "sdk",
     "crypto",
     "evm",
-    "lifi"
+    "lifi",
+    "react",
+    "hooks",
+    "provider"
   ],
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -30,6 +33,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.mjs",
+      "require": "./dist/react.js"
     }
   },
   "files": [
@@ -49,6 +57,7 @@
     "prepublishOnly": "pnpm run build"
   },
   "devDependencies": {
+    "@types/react": "^18.2.48",
     "tsup": "^8.0.1",
     "typescript": "^5.3.3"
   },
