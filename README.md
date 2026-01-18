@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="mina-sdk-logo.png" alt="Mina SDK" width="400" />
+  <img src="mina-sdk-logo.svg" alt="Mina SDK" width="400" />
 </p>
 
 <h1 align="center">@siphoyawe/mina-sdk</h1>
