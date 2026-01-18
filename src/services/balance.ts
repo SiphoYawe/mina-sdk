@@ -422,18 +422,96 @@ function mapLifiBalanceToBalance(lifiToken: LifiTokenBalanceResponse): BalanceWi
 }
 
 /**
- * Fetch a single token balance from LI.FI API
- * Uses the /v1/token endpoint with chain, token, and user parameters
- * Reference: https://apidocs.li.fi/reference/get_token
+ * Get RPC URL for a chain from LI.FI chains data
+ */
+async function getRpcUrlForChain(chainId: number): Promise<string> {
+  const url = `${LIFI_API_URL}/v1/chains`;
+  const response = await fetchWithTimeout(url);
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch chains: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const chain = data.chains?.find((c: { id: number }) => c.id === chainId);
+
+  if (!chain?.metamask?.rpcUrls?.[0]) {
+    throw new Error(`No RPC URL found for chain ${chainId}`);
+  }
+
+  return chain.metamask.rpcUrls[0];
+}
+
+/**
+ * Fetch balance directly via RPC call to the token contract
+ * Uses eth_call with balanceOf(address) selector
+ */
+async function fetchBalanceViaRpc(
+  walletAddress: string,
+  chainId: number,
+  tokenAddress: string
+): Promise<string> {
+  const rpcUrl = await getRpcUrlForChain(chainId);
+
+  // For native token, use eth_getBalance
+  if (tokenAddress.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase()) {
+    const response = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'eth_getBalance',
+        params: [walletAddress, 'latest'],
+        id: 1,
+      }),
+    });
+
+    const data = await response.json();
+    if (data.error) {
+      throw new Error(`RPC error: ${data.error.message}`);
+    }
+
+    // Convert hex to decimal string
+    return BigInt(data.result).toString();
+  }
+
+  // For ERC-20 tokens, use balanceOf
+  // balanceOf(address) selector: 0x70a08231
+  // Pad address to 32 bytes
+  const paddedAddress = walletAddress.slice(2).toLowerCase().padStart(64, '0');
+  const callData = `0x70a08231${paddedAddress}`;
+
+  const response = await fetch(rpcUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'eth_call',
+      params: [{ to: tokenAddress, data: callData }, 'latest'],
+      id: 1,
+    }),
+  });
+
+  const data = await response.json();
+  if (data.error) {
+    throw new Error(`RPC error: ${data.error.message}`);
+  }
+
+  // Convert hex result to decimal string
+  return BigInt(data.result).toString();
+}
+
+/**
+ * Fetch a single token balance using LI.FI for metadata and RPC for balance
+ * LI.FI /v1/token provides token info, RPC provides actual balance
  */
 async function fetchBalanceFromApi(
   address: string,
   chainId: number,
   tokenAddress: string
 ): Promise<BalanceWithMetadata> {
-  // LI.FI API endpoint for token balance with user context
-  // Format: /v1/token?chain={chainId}&token={tokenAddress}&user={userAddress}
-  const url = `${LIFI_API_URL}/v1/token?chain=${chainId}&token=${tokenAddress}&user=${address}`;
+  // Fetch token metadata from LI.FI
+  const url = `${LIFI_API_URL}/v1/token?chain=${chainId}&token=${tokenAddress}`;
   const response = await fetchWithTimeout(url);
 
   if (!response.ok) {
@@ -447,7 +525,16 @@ async function fetchBalanceFromApi(
     throw new Error('Invalid response format from LI.FI API: missing or invalid required fields');
   }
 
-  return mapLifiBalanceToBalance(data);
+  // Fetch actual balance via RPC
+  const balanceRaw = await fetchBalanceViaRpc(address, chainId, tokenAddress);
+
+  // Add balance to the token data
+  const tokenDataWithBalance = {
+    ...data,
+    amount: balanceRaw,
+  };
+
+  return mapLifiBalanceToBalance(tokenDataWithBalance);
 }
 
 /**
